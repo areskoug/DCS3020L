@@ -1,0 +1,11 @@
+name: Samspel Hub
+version: "0.1.0"
+slug: samspel
+description: Multiroom-hubb för Google Cast och Denon HEOS
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+# Högtalarna hämtar ljudet direkt från hubben och upptäckts-protokollen (mDNS/SSDP) kräver värdnätverk.
+host_network: true

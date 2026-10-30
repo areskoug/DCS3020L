@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Samspel Hub</title>
+<style>
+  :root { color-scheme: dark; --bg:#111; --card:#1d1d1f; --fg:#f2f2f2; --dim:#8e8e93; --accent:#d4a574; }
+  body { margin:0; font:16px system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:560px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.4rem; } h2 { font-size:.8rem; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:24px 0 8px; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:10px; }
+  .row { display:flex; align-items:center; gap:10px; justify-content:space-between; }
+  .dim { color:var(--dim); font-size:.85rem; }
+  button { background:#2c2c2e; color:var(--fg); border:0; border-radius:10px; padding:8px 14px; font:inherit; }
+  button.primary { background:var(--accent); color:#111; }
+  input[type=text] { width:100%; box-sizing:border-box; background:#2c2c2e; color:var(--fg); border:0; border-radius:10px; padding:10px; font:inherit; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  label { display:flex; gap:8px; align-items:center; padding:4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Samspel Hub</h1>
+  <div id="msg" class="dim"></div>
+
+  <h2>Grupper</h2>
+  <div id="groups"></div>
+
+  <h2>Ny grupp</h2>
+  <div class="card">
+    <input id="gname" type="text" placeholder="Gruppnamn (t.ex. Vardagsrum)">
+    <div id="pick" style="margin:10px 0"></div>
+    <button class="primary" id="create">Skapa grupp</button>
+  </div>
+
+  <h2>Enheter</h2>
+  <div class="row" style="margin-bottom:8px"><span class="dim">Cast och Denon HEOS</span><button id="scan">Sök igen</button></div>
+  <div id="devices"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const api = (path, opts = {}) => fetch('api/' + path, { headers:{'Content-Type':'application/json'}, ...opts })
+  .then(async r => { if (!r.ok) throw new Error(await r.text() || r.statusText); return r.status === 204 ? null : r.json(); });
+const post = (path, body) => api(path, { method:'POST', body: body && JSON.stringify(body) });
+const say = t => $('#msg').textContent = t || '';
+let devices = [], groups = [];
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function render() {
+  const name = id => (devices.find(d => d.id === id) || {name:id}).name;
+  $('#devices').innerHTML = devices.map(d => `
+    <div class="card"><div class="row"><div><b>${esc(d.name)}</b><div class="dim">${d.kind} · ${esc(d.addr)}</div></div></div>
+    <input type="range" min="0" max="100" value="30" data-vol="${d.id}"></div>`).join('') || '<div class="dim">Inga enheter hittade än.</div>';
+  $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
+  $('#groups').innerHTML = groups.map(g => `
+    <div class="card"><div class="row"><div><b>${esc(g.name)}</b>
+      <div class="dim">${g.deviceIds.map(i => esc(name(i))).join(', ') || 'Tom grupp'}</div></div>
+      <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Spela'}</button>
+      <button data-act="del" data-id="${g.id}">✕</button></div></div></div>`).join('') || '<div class="dim">Inga grupper än.</div>';
+}
+
+async function refresh() { [devices, groups] = await Promise.all([api('devices'), api('groups')]); render(); }
+
+$('#scan').onclick = async () => {
+  say('Söker efter enheter…');
+  try { const r = await post('discover'); devices = r.devices; say(r.error || ''); } catch (e) { say(e.message); }
+  await refresh();
+};
+$('#create').onclick = async () => {
+  const deviceIds = [...document.querySelectorAll('#pick input:checked')].map(i => i.value);
+  const name = $('#gname').value.trim();
+  if (!name) return say('Ange ett gruppnamn.');
+  try { await post('groups', { name, deviceIds }); $('#gname').value = ''; say(''); await refresh(); } catch (e) { say(e.message); }
+};
+$('#groups').onclick = async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  try {
+    if (b.dataset.act === 'del') await api('groups/' + b.dataset.id, { method:'DELETE' });
+    else { say(b.dataset.act === 'play' ? 'Startar…' : ''); await post(`groups/${b.dataset.id}/${b.dataset.act}`); say(''); }
+  } catch (err) { say(err.message); }
+  await refresh();
+};
+$('#devices').onchange = e => {
+  if (e.target.dataset.vol) post(`devices/${e.target.dataset.vol}/volume`, { percent:+e.target.value }).catch(err => say(err.message));
+};
+refresh();
+</script>
+</body>
+</html>
