@@ -33,13 +33,6 @@ func Handler(h *hub.Hub) http.Handler {
 		}
 		writeJSON(w, resp)
 	})
-	mux.HandleFunc("GET /api/formats", func(w http.ResponseWriter, r *http.Request) {
-		names := make([]string, len(stream.Formats))
-		for i, f := range stream.Formats {
-			names[i] = f.Name
-		}
-		writeJSON(w, names)
-	})
 	mux.HandleFunc("GET /api/groups", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, h.Groups()) })
 	mux.HandleFunc("POST /api/groups", func(w http.ResponseWriter, r *http.Request) {
 		var g hub.Group

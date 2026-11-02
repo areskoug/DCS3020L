@@ -24,9 +24,7 @@ type Group struct {
 	DeviceIDs []string `json:"deviceIds"`
 	// DelaysMs holds the extra delay per device ID, used to line up speakers that buffer differently.
 	DelaysMs map[string]int `json:"delaysMs,omitempty"`
-	// Format is the name of the stream encoding, see stream.Formats. Empty means the default.
-	Format string `json:"format,omitempty"`
-	Active bool   `json:"active"`
+	Active   bool           `json:"active"`
 	// Solo marks the implicit one-speaker group every device gets, so it can be picked on its own in AirPlay.
 	// Solo groups are rebuilt from the device list and never stored.
 	Solo bool `json:"solo,omitempty"`
@@ -284,7 +282,7 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 	h.mu.Unlock()
 
 	sctx, cancel := context.WithCancel(context.Background())
-	format := stream.FormatByName(g.Format)
+	format := stream.Formats[0] // delays are calibrated per format, so the format is fixed
 	b, err := stream.New(sctx, format)
 	if err != nil {
 		cancel()
