@@ -148,10 +148,15 @@ func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {
 	}
 	go func() { <-ctx.Done(); f.Close() }()
 	go func() {
+		var last time.Time
 		for {
 			buf := make([]byte, 8192)
 			n, err := f.Read(buf)
 			if n > 0 {
+				if time.Since(last) > 2*time.Second {
+					log.Printf("airplay %s: receiving audio", g.Name)
+				}
+				last = time.Now()
 				select {
 				case in.pcm <- buf[:n]:
 				default: // nobody is listening, drop it
@@ -168,7 +173,8 @@ func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {
 	}
 	for ctx.Err() == nil {
 		log.Printf("airplay %s: starting shairport-sync on port %d", g.Name, port)
-		cmd := exec.CommandContext(ctx, m.bin, "-c", conf)
+		// -u logs to stderr instead of syslog, -v adds some detail.
+		cmd := exec.CommandContext(ctx, m.bin, "-u", "-v", "-c", conf)
 		out, _ := cmd.StdoutPipe()
 		cmd.Stderr = cmd.Stdout
 		if err := cmd.Start(); err != nil {
