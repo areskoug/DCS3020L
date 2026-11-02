@@ -245,5 +245,5 @@ func (h *Hub) streamURL(d devices.Device, groupID string, delayMs int) (string, 
 	}
 	defer c.Close()
 	ip := c.LocalAddr().(*net.UDPAddr).IP
-	return fmt.Sprintf("http://%s:%d/stream/%s.mp3?delay=%d", ip, h.port, groupID, delayMs), nil
+	return fmt.Sprintf("http://%s:%d/stream/%s/%d.mp3", ip, h.port, groupID, delayMs), nil
 }

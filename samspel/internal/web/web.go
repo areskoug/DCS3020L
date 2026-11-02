@@ -72,42 +72,49 @@ func Handler(h *hub.Hub) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	// The delay lives in the path because HEOS passes a percent-encoded '=' on to the stream request unchanged.
+	mux.HandleFunc("GET /stream/{id}/{file}", func(w http.ResponseWriter, r *http.Request) {
+		ms := atoi(strings.TrimSuffix(r.PathValue("file"), ".mp3"))
+		serveStream(h, w, r, r.PathValue("id"), time.Duration(clamp(ms, 0, 40000))*time.Millisecond)
+	})
 	mux.HandleFunc("GET /stream/{name}", func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimSuffix(r.PathValue("name"), ".mp3")
-		ch, unsub, ok := h.Subscribe(id)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		defer unsub()
-		delay := time.Duration(clamp(atoi(r.URL.Query().Get("delay")), 0, 40000)) * time.Millisecond
-		log.Printf("stream %s: %s connected, delay %v (%s)", id, r.RemoteAddr, delay, r.UserAgent())
-		defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
-		w.Header().Set("Content-Type", "audio/mpeg")
-		w.Header().Set("Cache-Control", "no-cache")
-		fl, _ := w.(http.Flusher)
-		for {
-			select {
-			case chunk := <-ch:
-				if wait := time.Until(chunk.At.Add(delay)); wait > 0 {
-					select {
-					case <-time.After(wait):
-					case <-r.Context().Done():
-						return
-					}
-				}
-				if _, err := w.Write(chunk.Data); err != nil {
-					return
-				}
-				if fl != nil {
-					fl.Flush()
-				}
-			case <-r.Context().Done():
-				return
-			}
-		}
+		serveStream(h, w, r, strings.TrimSuffix(r.PathValue("name"), ".mp3"), 0)
 	})
 	return mux
+}
+
+func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, delay time.Duration) {
+	ch, unsub, ok := h.Subscribe(id)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	defer unsub()
+	log.Printf("stream %s: %s connected, delay %v (%s)", id, r.RemoteAddr, delay, r.UserAgent())
+	defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
+	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("Cache-Control", "no-cache")
+	fl, _ := w.(http.Flusher)
+	for {
+		select {
+		case chunk := <-ch:
+			if wait := time.Until(chunk.At.Add(delay)); wait > 0 {
+				select {
+				case <-time.After(wait):
+				case <-r.Context().Done():
+					return
+				}
+			}
+			if _, err := w.Write(chunk.Data); err != nil {
+				return
+			}
+			if fl != nil {
+				fl.Flush()
+			}
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
