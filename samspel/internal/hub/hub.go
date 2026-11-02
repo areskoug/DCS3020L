@@ -98,10 +98,10 @@ func (h *Hub) rebuildSolos() {
 		}
 		id := soloPrefix + d.ID
 		if g, ok := h.groups[id]; ok {
-			g.Name, g.DeviceIDs = name, []string{d.ID}
+			g.Name, g.DeviceIDs, g.Format = name, []string{d.ID}, d.Format
 			continue
 		}
-		h.groups[id] = &Group{ID: id, Name: name, DeviceIDs: []string{d.ID}, Solo: true}
+		h.groups[id] = &Group{ID: id, Name: name, DeviceIDs: []string{d.ID}, Format: d.Format, Solo: true}
 	}
 }
 
@@ -195,6 +195,7 @@ func (h *Hub) Discover(ctx context.Context) error {
 	}
 	h.mu.Lock()
 	for _, d := range found {
+		d.Format = h.devices[d.ID].Format
 		h.devices[d.ID] = d
 	}
 	h.rebuildSolos()
@@ -212,6 +213,28 @@ func (h *Hub) Devices() []devices.Device {
 		out = append(out, d)
 	}
 	return out
+}
+
+// SetDeviceFormat sets the stream format used when a speaker is played on its own.
+// It reports false if the device or the format is unknown. It takes effect the next time the speaker starts.
+func (h *Hub) SetDeviceFormat(id, format string) bool {
+	if format != "" && stream.FormatByName(format).Name != format {
+		return false
+	}
+	if format == stream.Formats[0].Name {
+		format = ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	d, ok := h.devices[id]
+	if !ok {
+		return false
+	}
+	d.Format = format
+	h.devices[id] = d
+	h.rebuildSolos()
+	h.save()
+	return true
 }
 
 func (h *Hub) Device(id string) (devices.Device, bool) {

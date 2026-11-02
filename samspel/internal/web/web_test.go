@@ -88,3 +88,21 @@ func TestIndexIsServed(t *testing.T) {
 		t.Errorf("status %d", r.StatusCode)
 	}
 }
+
+func TestDeviceFormatAPI(t *testing.T) {
+	srv := testServer(t)
+	if r := do(t, "POST", srv.URL+"/api/devices/cast-2/format", `{"format":"wav"}`); r.StatusCode != 204 {
+		t.Errorf("wav: %d", r.StatusCode)
+	}
+	if r := do(t, "POST", srv.URL+"/api/devices/cast-2/format", `{"format":"ogg"}`); r.StatusCode != 400 {
+		t.Errorf("ogg: %d", r.StatusCode)
+	}
+	if r := do(t, "POST", srv.URL+"/api/devices/nope/format", `{"format":"wav"}`); r.StatusCode != 400 {
+		t.Errorf("unknown device: %d", r.StatusCode)
+	}
+	var devs []map[string]any
+	json.NewDecoder(do(t, "GET", srv.URL+"/api/devices", "").Body).Decode(&devs)
+	if len(devs) != 1 || devs[0]["format"] != "wav" {
+		t.Errorf("devices = %v", devs)
+	}
+}

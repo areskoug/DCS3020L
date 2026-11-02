@@ -106,3 +106,33 @@ func TestDelayKeyKeepsFormatsApart(t *testing.T) {
 		t.Error("other formats must get their own key")
 	}
 }
+
+func TestDeviceFormatIsKeptAcrossRestartAndShownOnTheSoloGroup(t *testing.T) {
+	h, state := newTestHub(t, "", twoDevices)
+	if !h.SetDeviceFormat("cast-2", "wav") {
+		t.Fatal("wav should be accepted")
+	}
+	if g := byID(h)["solo-cast-2"]; g.Format != "wav" {
+		t.Errorf("solo format = %q", g.Format)
+	}
+	if byID(h)["solo-heos-1"].Format != "" {
+		t.Error("other speakers must keep the default")
+	}
+
+	h2 := New(8080, state, nil)
+	if byID(h2)["solo-cast-2"].Format != "wav" {
+		t.Error("format lost after restart")
+	}
+}
+
+func TestDeviceFormatValidation(t *testing.T) {
+	h, _ := newTestHub(t, "", twoDevices)
+	if h.SetDeviceFormat("cast-2", "ogg") || h.SetDeviceFormat("nope", "wav") {
+		t.Error("unknown format or device must be refused")
+	}
+	h.SetDeviceFormat("cast-2", "wav")
+	h.SetDeviceFormat("cast-2", "mp3-192") // naming the default clears the setting
+	if d, _ := h.Device("cast-2"); d.Format != "" {
+		t.Errorf("format = %q, want default", d.Format)
+	}
+}

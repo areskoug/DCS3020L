@@ -78,6 +78,16 @@ func Handler(h *hub.Hub) http.Handler {
 		h.SetGroupVolume(r.PathValue("id"), clamp(body.Percent, 0, 100))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/devices/{id}/format", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Format string `json:"format"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || !h.SetDeviceFormat(r.PathValue("id"), body.Format) {
+			http.Error(w, "unknown device or format", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/devices/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Percent int `json:"percent"`

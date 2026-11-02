@@ -68,6 +68,9 @@ function render() {
   $('#devices').innerHTML = devices.map(d => `
     <div class="card"><div class="row"><div><b>${esc(d.name)}</b><div class="dim">${d.kind} · ${esc(d.addr)}${soloName(d) ? ' · AirPlay: ”' + esc(soloName(d)) + '”' : ''}</div></div></div>
     <div class="np" data-np="solo-${d.id}">${npHtml(groups.find(g => g.id === 'solo-' + d.id))}</div>
+    <label class="row"><span class="dim">Ljudformat</span><select data-dev-format="${d.id}">
+      <option value=""${d.format ? '' : ' selected'}>Normal (MP3)</option>
+      <option value="wav"${d.format === 'wav' ? ' selected' : ''}>Lågt lagg (WAV)</option></select></label>
     <input type="range" min="0" max="100" value="30" data-vol="${d.id}"></div>`).join('') || '<div class="dim">Inga enheter hittade än.</div>';
   $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
   $('#groups').innerHTML = groups.filter(g => !g.solo).map(g => `
@@ -126,7 +129,11 @@ $('#groups').onchange = async e => {
   g.delaysMs = { ...(g.delaysMs || {}), [delayKey(g, el.dataset.delayDev)]: Math.round(+el.value * 1000) };
   try { await post('groups', g); say(g.active ? 'Fördröjningen gäller nästa gång du trycker Spela.' : ''); } catch (err) { say(err.message); }
 };
-$('#devices').onchange = e => {
+$('#devices').onchange = async e => {
+  if (e.target.dataset.devFormat) {
+    try { await post(`devices/${e.target.dataset.devFormat}/format`, { format: e.target.value }); say('Formatet gäller nästa gång högtalaren startar.'); await refresh(); } catch (err) { say(err.message); }
+    return;
+  }
   if (e.target.dataset.vol) post(`devices/${e.target.dataset.vol}/volume`, { percent:+e.target.value }).catch(err => say(err.message));
 };
 setInterval(async () => {

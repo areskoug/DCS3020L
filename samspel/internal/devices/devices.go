@@ -19,6 +19,9 @@ type Device struct {
 	Port int    `json:"port"`
 	// HEOSPid is the HEOS player id, set only for Kind == HEOS.
 	HEOSPid string `json:"heosPid,omitempty"`
+	// Format is the stream encoding used when this speaker is played on its own ("" is the default).
+	// It is a setting, not discovery data, so discovery must keep it.
+	Format string `json:"format,omitempty"`
 }
 
 // Player controls a single device.
