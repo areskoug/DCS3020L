@@ -1,5 +1,5 @@
 name: Samspel Hub
-version: "0.6.6"
+version: "0.6.7"
 slug: samspel
 description: Multiroom-hubb för Google Cast och Denon HEOS
 arch:
@@ -9,5 +9,10 @@ startup: application
 boot: auto
 # Högtalarna hämtar ljudet direkt från hubben och upptäckts-protokollen (mDNS/SSDP) kräver värdnätverk.
 host_network: true
-# Länken "Öppna webbgränssnittet" på tilläggets informationssida. Porten är fast eftersom vi kör på värdnätverket.
-webui: "http://[HOST]:8080/"
+# Länken "Öppna webbgränssnittet" på tilläggets informationssida. Formen [HOST]:[PORT:nnnn] är den som dokumentationen
+# visar. Porten behöver finnas under ports för att kunna slås upp, även om värdnätverket gör att den inte mappas.
+webui: "http://[HOST]:[PORT:8080]/"
+ports:
+  8080/tcp: 8080
+ports_description:
+  8080/tcp: Webbgränssnitt och ljudströmmar
