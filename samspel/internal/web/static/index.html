@@ -20,6 +20,7 @@
   .np:empty { display:none; }
   .np img { width:48px; height:48px; border-radius:8px; object-fit:cover; }
   .np b, .np span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  select { background:#2c2c2e; color:var(--fg); border:0; border-radius:8px; padding:6px; font:inherit; }
   label { display:flex; gap:8px; align-items:center; padding:4px 0; }
 </style>
 </head>
@@ -50,6 +51,9 @@ const post = (path, body) => api(path, { method:'POST', body: body && JSON.strin
 const say = t => $('#msg').textContent = t || '';
 let devices = [], groups = [];
 
+// Delays are calibrated per format, see hub.DelayKey.
+const delayKey = (g, dev) => g.format && g.format !== 'mp3-192' ? `${dev}@${g.format}` : dev;
+
 const npHtml = g => {
   const n = g && g.nowPlaying; if (!n || !(n.title || n.playing)) return '';
   const img = n.coverVer ? `<img src="api/groups/${g.id}/cover?v=${n.coverVer}" alt="">` : '';
@@ -72,8 +76,11 @@ function render() {
       <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Testton'}</button>
       <button data-act="del" data-id="${g.id}">✕</button></div></div>
       <div class="np" data-np="${g.id}">${npHtml(g)}</div>
+      <label class="row"><span>Ljudformat</span><select data-format-group="${g.id}">
+        <option value=""${g.format ? '' : ' selected'}>Normal (MP3)</option>
+        <option value="wav"${g.format === 'wav' ? ' selected' : ''}>Lågt lagg (WAV)</option></select></label>
       ${g.deviceIds.map(i => `<label class="row"><span>${esc(name(i))}</span><span class="dim"><input type="number" min="0" max="40" step="0.5" style="width:4.5em"
-        value="${((g.delaysMs || {})[i] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span>
+        value="${((g.delaysMs || {})[delayKey(g, i)] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span>
         <span class="dim"><input type="number" min="0" max="100" step="5" style="width:4em"
         value="${(g.trimsPct || {})[i] ?? 100}" data-trim-group="${g.id}" data-trim-dev="${i}"> % nivå</span></label>`).join('')}
       </div>`).join('') || '<div class="dim">Inga grupper än.</div>';
@@ -102,6 +109,12 @@ $('#groups').onclick = async e => {
 };
 $('#groups').onchange = async e => {
   const el = e.target;
+  if (el.dataset.formatGroup) {
+    const g = groups.find(x => x.id === el.dataset.formatGroup);
+    g.format = el.value;
+    try { await post('groups', g); await refresh(); say(g.active ? 'Formatet gäller nästa gång gruppen startar. Fördröjningen sparas separat per format.' : 'Fördröjningen sparas separat per format.'); } catch (err) { say(err.message); }
+    return;
+  }
   if (el.dataset.trimGroup) {
     const g = groups.find(x => x.id === el.dataset.trimGroup);
     g.trimsPct = { ...(g.trimsPct || {}), [el.dataset.trimDev]: Math.max(0, Math.min(100, Math.round(+el.value))) };
@@ -110,7 +123,7 @@ $('#groups').onchange = async e => {
   }
   if (!el.dataset.delayGroup) return;
   const g = groups.find(x => x.id === el.dataset.delayGroup);
-  g.delaysMs = { ...(g.delaysMs || {}), [el.dataset.delayDev]: Math.round(+el.value * 1000) };
+  g.delaysMs = { ...(g.delaysMs || {}), [delayKey(g, el.dataset.delayDev)]: Math.round(+el.value * 1000) };
   try { await post('groups', g); say(g.active ? 'Fördröjningen gäller nästa gång du trycker Spela.' : ''); } catch (err) { say(err.message); }
 };
 $('#devices').onchange = e => {

@@ -22,9 +22,12 @@ type Group struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	DeviceIDs []string `json:"deviceIds"`
-	// DelaysMs holds the extra delay per device ID, used to line up speakers that buffer differently.
+	// DelaysMs holds the extra delay per device, used to line up speakers that buffer differently.
+	// Speakers buffer each format differently, so see DelayKey for how the entries are keyed.
 	DelaysMs map[string]int `json:"delaysMs,omitempty"`
-	Active   bool           `json:"active"`
+	// Format is the stream encoding: "mp3-192" (default, empty) or "wav" (uncompressed, for lower lag).
+	Format string `json:"format,omitempty"`
+	Active bool   `json:"active"`
 	// TrimsPct scales the group volume per device (default 100), so one room can stay quieter than another.
 	TrimsPct map[string]int `json:"trimsPct,omitempty"`
 	// Solo marks the implicit one-speaker group every device gets, so it can be picked on its own in AirPlay.
@@ -67,6 +70,15 @@ func New(port int, statePath string, air *airplay.Manager) *Hub {
 }
 
 const soloPrefix = "solo-"
+
+// DelayKey is the DelaysMs key for a device. The default format uses the plain device ID, others add "@format",
+// so delays calibrated for one format are kept when switching to another and back.
+func DelayKey(deviceID, format string) string {
+	if format == "" || format == stream.Formats[0].Name {
+		return deviceID
+	}
+	return deviceID + "@" + format
+}
 
 // rebuildSolos makes one single-speaker group per known device. It must be called with h.mu held.
 // A device whose name equals a user group's name gets a suffix, because AirPlay names must be unique.
@@ -294,7 +306,7 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 	h.mu.Unlock()
 
 	sctx, cancel := context.WithCancel(context.Background())
-	format := stream.Formats[0] // delays are calibrated per format, so the format is fixed
+	format := stream.FormatByName(g.Format)
 	b, err := stream.New(sctx, format)
 	if err != nil {
 		cancel()
@@ -327,7 +339,7 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 			errs = append(errs, fmt.Errorf("device %s not found", did))
 			continue
 		}
-		url, err := h.streamURL(d, id, delays[did], format.Ext)
+		url, err := h.streamURL(d, id, delays[DelayKey(did, format.Name)], format.Ext)
 		if err != nil {
 			errs = append(errs, err)
 			continue

@@ -97,3 +97,12 @@ func TestStartingUnknownGroupFails(t *testing.T) {
 		t.Error("expected an error")
 	}
 }
+
+func TestDelayKeyKeepsFormatsApart(t *testing.T) {
+	if DelayKey("heos-1", "") != "heos-1" || DelayKey("heos-1", "mp3-192") != "heos-1" {
+		t.Error("the default format must use the plain device ID")
+	}
+	if DelayKey("heos-1", "wav") != "heos-1@wav" {
+		t.Error("other formats must get their own key")
+	}
+}

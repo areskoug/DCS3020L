@@ -30,7 +30,7 @@ HA läser den gren som är förvald i GitHub. Höj `version` i `samspel/config.y
 ## Begränsningar
 - **Fördröjning:** högtalarna buffrar ungefär 10 s (HEOS) och 26 s (Cast) innan de spelar. Därför kommer ljudet sent,
   och paus, låtbyte och tryck på play märks sent. Det beror på högtalarna. `LIVE`-läge i Cast och andra ljudformat gav ingen förbättring.
-- Ljudet kodas som MP3 192 kbit/s. Fördröjningarna är kalibrerade mot det formatet, så ändra det inte utan att mäta om.
+- Ljudet kodas som MP3 192 kbit/s, eller som okomprimerad WAV (valbart per grupp, testas för lägre lagg). Fördröjningarna sparas separat per format.
 - AirPlay 1 (Alpines shairport-sync saknar AirPlay 2 och nqptp). Räcker för musik från iPhone.
 - Om en högtalare ingår i en aktiv grupp och du spelar till den enskilt vinner den som startade senast.
 - Hubben har ingen inloggning. Den ska bara nås från det lokala nätet.
