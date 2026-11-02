@@ -1,4 +1,4 @@
-// Package stream turns raw PCM into an MP3 live stream and fans it out to HTTP clients.
+// Package stream turns raw PCM into an live audio stream and fans it out to HTTP clients.
 package stream
 
 import (
@@ -30,13 +30,18 @@ type Broadcaster struct {
 
 	pcmIn io.WriteCloser
 	cmd   *exec.Cmd
+
+	headerLen func([]byte) (int, bool)
+	pending   []byte // bytes seen before the header was complete
+	header    []byte // set once complete
 }
 
-// New starts an ffmpeg process that encodes PCM from Write into MP3.
-func New(ctx context.Context) (*Broadcaster, error) {
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error",
-		"-f", "s16le", "-ar", fmt.Sprint(SampleRate), "-ac", fmt.Sprint(Channels), "-i", "pipe:0",
-		"-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", "pipe:1")
+// New starts an ffmpeg process that encodes PCM from Write into the given format.
+func New(ctx context.Context, f Format) (*Broadcaster, error) {
+	args := []string{"-hide_banner", "-loglevel", "error",
+		"-f", "s16le", "-ar", fmt.Sprint(SampleRate), "-ac", fmt.Sprint(Channels), "-i", "pipe:0"}
+	args = append(append(args, f.Args...), "-flush_packets", "1", "pipe:1")
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -48,7 +53,7 @@ func New(ctx context.Context) (*Broadcaster, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
-	b := &Broadcaster{subs: map[chan Chunk]struct{}{}, pcmIn: in, cmd: cmd}
+	b := &Broadcaster{subs: map[chan Chunk]struct{}{}, pcmIn: in, cmd: cmd, headerLen: f.HeaderLen}
 	go b.pump(out)
 	return b, nil
 }
@@ -60,6 +65,17 @@ func (b *Broadcaster) pump(r io.Reader) {
 		if n > 0 {
 			chunk := Chunk{At: time.Now(), Data: append([]byte(nil), buf[:n]...)}
 			b.mu.Lock()
+			if b.headerLen != nil && b.header == nil {
+				b.pending = append(b.pending, chunk.Data...)
+				hl, ok := b.headerLen(b.pending)
+				if !ok {
+					b.mu.Unlock()
+					continue
+				}
+				b.header = append([]byte(nil), b.pending[:hl]...)
+				chunk.Data = b.pending
+				b.pending = nil
+			}
 			for ch := range b.subs {
 				select {
 				case ch <- chunk:
@@ -88,6 +104,9 @@ func (b *Broadcaster) Close() error {
 func (b *Broadcaster) Subscribe() (<-chan Chunk, func()) {
 	ch := make(chan Chunk, 1024)
 	b.mu.Lock()
+	if b.header != nil {
+		ch <- Chunk{Data: b.header} // zero time: due immediately
+	}
 	b.subs[ch] = struct{}{}
 	b.mu.Unlock()
 	return ch, func() {

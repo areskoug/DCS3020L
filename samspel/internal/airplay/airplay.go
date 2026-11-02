@@ -18,6 +18,9 @@ import (
 
 const (
 	basePort = 5100
+	// udpBase is where the first instance starts looking for UDP ports. Each instance gets its own block of
+	// ten, so groups that play at the same time do not fight over ports.
+	udpBase = 6001
 	// activeTimeout is how long shairport-sync waits after playback ends before the hub stops the group.
 	activeTimeout = 20
 )
@@ -128,6 +131,7 @@ func (m *Manager) config(g Group, port int, fifo string) string {
 	// Instead the hub sets the speakers' own volume right away. AirPlay appends the volume to the hook command.
 	return fmt.Sprintf(`general = {
 	name = "%s"; port = %d; output_backend = "pipe";
+	udp_port_base = %d; udp_port_range = 10;
 	ignore_volume_control = "yes";
 	run_this_when_volume_is_set = "%s ";
 };
@@ -137,7 +141,7 @@ sessioncontrol = {
 	run_this_after_exiting_active_state = "%s";
 	active_state_timeout = %d.0;
 };
-`, q(g.Name), port, q(m.volumeHook(g.ID)), q(fifo), q(m.hook(g.ID, "play")), q(m.hook(g.ID, "stop")), activeTimeout)
+`, q(g.Name), port, udpBase+10*(port-basePort), q(m.volumeHook(g.ID)), q(fifo), q(m.hook(g.ID, "play")), q(m.hook(g.ID, "stop")), activeTimeout)
 }
 
 func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {

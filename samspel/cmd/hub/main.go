@@ -60,6 +60,7 @@ func main() {
 	}
 
 	h := hub.New(*port, *state, air)
+	go h.Run(context.Background())
 	log.Printf("listening on :%d", *port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), web.Handler(h)))
 }

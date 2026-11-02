@@ -14,6 +14,7 @@
   .dim { color:var(--dim); font-size:.85rem; }
   button { background:#2c2c2e; color:var(--fg); border:0; border-radius:10px; padding:8px 14px; font:inherit; }
   button.primary { background:var(--accent); color:#111; }
+  select { background:#2c2c2e; color:var(--fg); border:0; border-radius:8px; padding:6px; font:inherit; }
   input[type=text] { width:100%; box-sizing:border-box; background:#2c2c2e; color:var(--fg); border:0; border-radius:10px; padding:10px; font:inherit; }
   input[type=range] { width:100%; accent-color:var(--accent); }
   label { display:flex; gap:8px; align-items:center; padding:4px 0; }
@@ -44,27 +45,30 @@ const api = (path, opts = {}) => fetch('api/' + path, { headers:{'Content-Type':
   .then(async r => { if (!r.ok) throw new Error(await r.text() || r.statusText); return r.status === 204 ? null : r.json(); });
 const post = (path, body) => api(path, { method:'POST', body: body && JSON.stringify(body) });
 const say = t => $('#msg').textContent = t || '';
-let devices = [], groups = [];
+let devices = [], groups = [], formats = [];
+
+const soloName = d => (groups.find(g => g.id === 'solo-' + d.id) || {}).name;
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function render() {
   const name = id => (devices.find(d => d.id === id) || {name:id}).name;
   $('#devices').innerHTML = devices.map(d => `
-    <div class="card"><div class="row"><div><b>${esc(d.name)}</b><div class="dim">${d.kind} · ${esc(d.addr)}</div></div></div>
+    <div class="card"><div class="row"><div><b>${esc(d.name)}</b><div class="dim">${d.kind} · ${esc(d.addr)}${soloName(d) ? ' · AirPlay: ”' + esc(soloName(d)) + '”' : ''}</div></div></div>
     <input type="range" min="0" max="100" value="30" data-vol="${d.id}"></div>`).join('') || '<div class="dim">Inga enheter hittade än.</div>';
   $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
-  $('#groups').innerHTML = groups.map(g => `
+  $('#groups').innerHTML = groups.filter(g => !g.solo).map(g => `
     <div class="card"><div class="row"><div><b>${esc(g.name)}</b>
       <div class="dim">${g.airplay ? 'AirPlay: välj ”' + esc(g.name) + '” på telefonen' : 'AirPlay ej tillgängligt'}${g.deviceIds.length ? '' : ' · Tom grupp'}</div></div>
       <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Testton'}</button>
       <button data-act="del" data-id="${g.id}">✕</button></div></div>
+      <label class="row"><span>Ljudformat</span><select data-format-group="${g.id}">${formats.map(f => `<option${f === (g.format || formats[0]) ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
       ${g.deviceIds.map(i => `<label class="row"><span>${esc(name(i))}</span><span class="dim"><input type="number" min="0" max="40" step="0.5" style="width:4.5em"
         value="${((g.delaysMs || {})[i] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span></label>`).join('')}
       </div>`).join('') || '<div class="dim">Inga grupper än.</div>';
 }
 
-async function refresh() { [devices, groups] = await Promise.all([api('devices'), api('groups')]); render(); }
+async function refresh() { [devices, groups, formats] = await Promise.all([api('devices'), api('groups'), api('formats')]); render(); }
 
 $('#scan').onclick = async () => {
   say('Söker efter enheter…');
@@ -86,7 +90,14 @@ $('#groups').onclick = async e => {
   await refresh();
 };
 $('#groups').onchange = async e => {
-  const el = e.target; if (!el.dataset.delayGroup) return;
+  const el = e.target;
+  if (el.dataset.formatGroup) {
+    const g = groups.find(x => x.id === el.dataset.formatGroup);
+    g.format = el.value;
+    try { await post('groups', g); say(g.active ? 'Formatet gäller nästa gång gruppen startar.' : ''); } catch (err) { say(err.message); }
+    return;
+  }
+  if (!el.dataset.delayGroup) return;
   const g = groups.find(x => x.id === el.dataset.delayGroup);
   g.delaysMs = { ...(g.delaysMs || {}), [el.dataset.delayDev]: Math.round(+el.value * 1000) };
   try { await post('groups', g); say(g.active ? 'Fördröjningen gäller nästa gång du trycker Spela.' : ''); } catch (err) { say(err.message); }

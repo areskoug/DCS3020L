@@ -13,6 +13,7 @@ import (
 
 	"github.com/areskoug/dcs3020l/internal/devices"
 	"github.com/areskoug/dcs3020l/internal/hub"
+	"github.com/areskoug/dcs3020l/internal/stream"
 )
 
 //go:embed static
@@ -31,6 +32,13 @@ func Handler(h *hub.Hub) http.Handler {
 			resp["error"] = err.Error()
 		}
 		writeJSON(w, resp)
+	})
+	mux.HandleFunc("GET /api/formats", func(w http.ResponseWriter, r *http.Request) {
+		names := make([]string, len(stream.Formats))
+		for i, f := range stream.Formats {
+			names[i] = f.Name
+		}
+		writeJSON(w, names)
 	})
 	mux.HandleFunc("GET /api/groups", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, h.Groups()) })
 	mux.HandleFunc("POST /api/groups", func(w http.ResponseWriter, r *http.Request) {
@@ -85,16 +93,17 @@ func Handler(h *hub.Hub) http.Handler {
 
 	// The delay lives in the path because HEOS passes a percent-encoded '=' on to the stream request unchanged.
 	mux.HandleFunc("GET /stream/{id}/{file}", func(w http.ResponseWriter, r *http.Request) {
-		ms := atoi(strings.TrimSuffix(r.PathValue("file"), ".mp3"))
-		serveStream(h, w, r, r.PathValue("id"), time.Duration(clamp(ms, 0, 40000))*time.Millisecond)
+		file := r.PathValue("file")
+		stem, ext, _ := strings.Cut(file, ".")
+		serveStream(h, w, r, r.PathValue("id"), time.Duration(clamp(atoi(stem), 0, 40000))*time.Millisecond, stream.FormatByExt(ext))
 	})
 	mux.HandleFunc("GET /stream/{name}", func(w http.ResponseWriter, r *http.Request) {
-		serveStream(h, w, r, strings.TrimSuffix(r.PathValue("name"), ".mp3"), 0)
+		serveStream(h, w, r, strings.TrimSuffix(r.PathValue("name"), ".mp3"), 0, stream.Formats[0])
 	})
 	return mux
 }
 
-func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, delay time.Duration) {
+func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, delay time.Duration, f stream.Format) {
 	ch, unsub, ok := h.Subscribe(id)
 	if !ok {
 		http.NotFound(w, r)
@@ -103,7 +112,7 @@ func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, 
 	defer unsub()
 	log.Printf("stream %s: %s connected, delay %v (%s)", id, r.RemoteAddr, delay, r.UserAgent())
 	defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
-	w.Header().Set("Content-Type", "audio/mpeg")
+	w.Header().Set("Content-Type", f.ContentType)
 	w.Header().Set("Cache-Control", "no-cache")
 	fl, _ := w.(http.Flusher)
 	for {

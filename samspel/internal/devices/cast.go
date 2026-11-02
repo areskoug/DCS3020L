@@ -45,7 +45,7 @@ func (p *castPlayer) connect() (*application.Application, error) {
 	return app, nil
 }
 
-func (p *castPlayer) Play(_ context.Context, url string) error {
+func (p *castPlayer) Play(_ context.Context, url, contentType string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	app, err := p.connect()
@@ -54,7 +54,7 @@ func (p *castPlayer) Play(_ context.Context, url string) error {
 	}
 	defer app.Close(false)
 	// detach=true returns right after the load command instead of waiting for the media to end.
-	return app.Load(url, 0, "audio/mpeg", false, true, false)
+	return app.Load(url, 0, contentType, false, true, false)
 }
 
 func (p *castPlayer) Stop(_ context.Context) error {

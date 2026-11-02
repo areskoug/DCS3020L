@@ -23,7 +23,7 @@ type Device struct {
 
 // Player controls a single device.
 type Player interface {
-	Play(ctx context.Context, url string) error
+	Play(ctx context.Context, url, contentType string) error
 	Stop(ctx context.Context) error
 	SetVolume(ctx context.Context, percent int) error
 }

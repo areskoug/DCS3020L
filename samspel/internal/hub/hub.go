@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +24,12 @@ type Group struct {
 	DeviceIDs []string `json:"deviceIds"`
 	// DelaysMs holds the extra delay per device ID, used to line up speakers that buffer differently.
 	DelaysMs map[string]int `json:"delaysMs,omitempty"`
-	Active   bool           `json:"active"`
+	// Format is the name of the stream encoding, see stream.Formats. Empty means the default.
+	Format string `json:"format,omitempty"`
+	Active bool   `json:"active"`
+	// Solo marks the implicit one-speaker group every device gets, so it can be picked on its own in AirPlay.
+	// Solo groups are rebuilt from the device list and never stored.
+	Solo bool `json:"solo,omitempty"`
 	// AirPlay tells the UI whether the group is visible as an AirPlay speaker. Not stored.
 	AirPlay bool `json:"airplay"`
 }
@@ -50,9 +56,55 @@ type running struct {
 func New(port int, statePath string, air *airplay.Manager) *Hub {
 	h := &Hub{port: port, statePath: statePath, air: air, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}, pendingVol: map[string]int{}, volBusy: map[string]bool{}}
 	h.load()
+	h.mu.Lock()
+	h.rebuildSolos()
+	h.mu.Unlock()
 	h.syncAirPlay()
 	return h
 }
+
+const soloPrefix = "solo-"
+
+// rebuildSolos makes one single-speaker group per known device. It must be called with h.mu held.
+// A device whose name equals a user group's name gets a suffix, because AirPlay names must be unique.
+func (h *Hub) rebuildSolos() {
+	taken := map[string]bool{}
+	for id, g := range h.groups {
+		if !g.Solo {
+			taken[g.Name] = true
+		} else if _, ok := h.devices[strings.TrimPrefix(id, soloPrefix)]; !ok {
+			delete(h.groups, id)
+		}
+	}
+	for _, d := range h.devices {
+		name := d.Name
+		if taken[name] {
+			name += " (högtalare)"
+		}
+		id := soloPrefix + d.ID
+		if g, ok := h.groups[id]; ok {
+			g.Name, g.DeviceIDs = name, []string{d.ID}
+			continue
+		}
+		h.groups[id] = &Group{ID: id, Name: name, DeviceIDs: []string{d.ID}, Solo: true}
+	}
+}
+
+// Run keeps the device list fresh: once at startup and then every ten minutes.
+func (h *Hub) Run(ctx context.Context) {
+	for {
+		if err := h.Discover(ctx); err != nil {
+			log.Printf("discover: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(10 * time.Minute):
+		}
+	}
+}
+
+func (h *Hub) devicesPath() string { return strings.TrimSuffix(h.statePath, ".json") + ".devices.json" }
 
 // syncAirPlay publishes the current groups as AirPlay speakers.
 func (h *Hub) syncAirPlay() {
@@ -66,6 +118,7 @@ func (h *Hub) syncAirPlay() {
 }
 
 func (h *Hub) load() {
+	h.loadDevices()
 	data, err := os.ReadFile(h.statePath)
 	if err != nil {
 		return
@@ -80,15 +133,34 @@ func (h *Hub) load() {
 	}
 }
 
+func (h *Hub) loadDevices() {
+	var ds []devices.Device
+	if data, err := os.ReadFile(h.devicesPath()); err == nil && json.Unmarshal(data, &ds) == nil {
+		for _, d := range ds {
+			h.devices[d.ID] = d
+		}
+	}
+}
+
 // save must be called with h.mu held.
 func (h *Hub) save() {
 	gs := make([]*Group, 0, len(h.groups))
 	for _, g := range h.groups {
-		gs = append(gs, g)
+		if !g.Solo {
+			gs = append(gs, g)
+		}
 	}
 	data, _ := json.MarshalIndent(gs, "", "  ")
 	if err := os.WriteFile(h.statePath, data, 0o644); err != nil {
 		log.Printf("save state: %v", err)
+	}
+	ds := make([]devices.Device, 0, len(h.devices))
+	for _, d := range h.devices {
+		ds = append(ds, d)
+	}
+	data, _ = json.MarshalIndent(ds, "", "  ")
+	if err := os.WriteFile(h.devicesPath(), data, 0o644); err != nil {
+		log.Printf("save devices: %v", err)
 	}
 }
 
@@ -110,7 +182,10 @@ func (h *Hub) Discover(ctx context.Context) error {
 	for _, d := range found {
 		h.devices[d.ID] = d
 	}
+	h.rebuildSolos()
+	h.save()
 	h.mu.Unlock()
+	h.syncAirPlay()
 	return errors.Join(errs...)
 }
 
@@ -150,9 +225,15 @@ func (h *Hub) SaveGroup(g Group) Group {
 		g.ID = fmt.Sprintf("g%d", time.Now().UnixNano())
 	}
 	if old, ok := h.groups[g.ID]; ok {
+		if old.Solo {
+			h.mu.Unlock()
+			return *old
+		}
 		g.Active = old.Active
 	}
+	g.Solo = false
 	h.groups[g.ID] = &g
+	h.rebuildSolos()
 	h.save()
 	h.mu.Unlock()
 	h.syncAirPlay()
@@ -160,9 +241,16 @@ func (h *Hub) SaveGroup(g Group) Group {
 }
 
 func (h *Hub) DeleteGroup(ctx context.Context, id string) {
+	h.mu.Lock()
+	g, ok := h.groups[id]
+	h.mu.Unlock()
+	if !ok || g.Solo {
+		return
+	}
 	h.StopGroup(ctx, id)
 	h.mu.Lock()
 	delete(h.groups, id)
+	h.rebuildSolos()
 	h.save()
 	h.mu.Unlock()
 	h.syncAirPlay()
@@ -196,7 +284,8 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 	h.mu.Unlock()
 
 	sctx, cancel := context.WithCancel(context.Background())
-	b, err := stream.New(sctx)
+	format := stream.FormatByName(g.Format)
+	b, err := stream.New(sctx, format)
 	if err != nil {
 		cancel()
 		return err
@@ -228,12 +317,12 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 			errs = append(errs, fmt.Errorf("device %s not found", did))
 			continue
 		}
-		url, err := h.streamURL(d, id, delays[did])
+		url, err := h.streamURL(d, id, delays[did], format.Ext)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if err := devices.NewPlayer(d).Play(ctx, url); err != nil {
+		if err := devices.NewPlayer(d).Play(ctx, url, format.ContentType); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 		}
 	}
@@ -265,14 +354,14 @@ func (h *Hub) StopGroup(ctx context.Context, id string) {
 }
 
 // streamURL builds the URL the device should fetch, using the local IP that routes to it.
-func (h *Hub) streamURL(d devices.Device, groupID string, delayMs int) (string, error) {
+func (h *Hub) streamURL(d devices.Device, groupID string, delayMs int, ext string) (string, error) {
 	c, err := net.Dial("udp4", net.JoinHostPort(d.Addr, "9"))
 	if err != nil {
 		return "", err
 	}
 	defer c.Close()
 	ip := c.LocalAddr().(*net.UDPAddr).IP
-	return fmt.Sprintf("http://%s:%d/stream/%s/%d.mp3", ip, h.port, groupID, delayMs), nil
+	return fmt.Sprintf("http://%s:%d/stream/%s/%d.%s", ip, h.port, groupID, delayMs, ext), nil
 }
 
 // SetGroupVolume sets the volume of every device in the group. Requests that arrive while speakers are
