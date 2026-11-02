@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/areskoug/dcs3020l/internal/airplay"
 	"github.com/areskoug/dcs3020l/internal/hub"
@@ -52,14 +56,30 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	air, err := airplay.New(context.Background(), *shairport, self, *airDir, *port)
+	// HA stops the add-on with SIGTERM and expects a clean exit with code 0.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+
+	air, err := airplay.New(ctx, *shairport, self, *airDir, *port)
 	if err != nil {
 		log.Printf("AirPlay disabled: %v", err)
 		air = nil
 	}
 
 	h := hub.New(*port, *state, air)
-	go h.Run(context.Background())
+	go h.Run(ctx)
+
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", *port), Handler: web.Handler(h)}
+	go func() {
+		<-ctx.Done()
+		log.Print("shutting down")
+		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdown) // streams are open-ended, so Shutdown gives up after the timeout
+		srv.Close()
+	}()
 	log.Printf("listening on :%d", *port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), web.Handler(h)))
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }
