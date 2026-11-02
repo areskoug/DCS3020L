@@ -178,3 +178,61 @@ func TestDevicesListShowsTheCushionInEffect(t *testing.T) {
 		t.Error("listing must not store the default")
 	}
 }
+
+func newMixedHub(t *testing.T) *Hub {
+	t.Helper()
+	h, _ := newTestHub(t, "", twoDevices) // heos-1 and cast-2
+	h.SaveGroup(Group{ID: "mixed", Name: "Blandad", DeviceIDs: []string{"heos-1", "cast-2"}})
+	h.SaveGroup(Group{ID: "heosonly", Name: "Bara HEOS", DeviceIDs: []string{"heos-1"}})
+	h.SaveGroup(Group{ID: "castonly", Name: "Bara Cast", DeviceIDs: []string{"cast-2"}})
+	return h
+}
+
+func TestHEOSGetsASmallDefaultDelayOnlyInMixedGroups(t *testing.T) {
+	h := newMixedHub(t)
+	gs := byID(h)
+	if got := gs["mixed"].DefaultDelaysMs; len(got) != 1 || got["heos-1"] != 50 {
+		t.Errorf("mixed group defaults = %v, want only heos-1: 50", got)
+	}
+	for _, id := range []string{"heosonly", "castonly", "solo-heos-1", "solo-cast-2"} {
+		if got := gs[id].DefaultDelaysMs; got != nil {
+			t.Errorf("%s should have no default delay, got %v", id, got)
+		}
+	}
+}
+
+func TestDefaultDelayFollowsTheGroupsFormat(t *testing.T) {
+	h := newMixedHub(t)
+	h.SaveGroup(Group{ID: "mixed", Name: "Blandad", DeviceIDs: []string{"heos-1", "cast-2"}, Format: "wav"})
+	if got := byID(h)["mixed"].DefaultDelaysMs; got["heos-1@wav"] != 50 || len(got) != 1 {
+		t.Errorf("defaults for WAV = %v, want heos-1@wav: 50", got)
+	}
+}
+
+func TestOwnDelaysBeatTheDefault(t *testing.T) {
+	h := newMixedHub(t)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	g := h.groups["mixed"]
+	if got := h.effectiveDelays(g, "mp3-192")["heos-1"]; got != 50 {
+		t.Errorf("unset delay = %d, want the default 50", got)
+	}
+	g.DelaysMs = map[string]int{"heos-1": 2050}
+	if got := h.effectiveDelays(g, "mp3-192")["heos-1"]; got != 2050 {
+		t.Errorf("own delay = %d, want 2050", got)
+	}
+	g.DelaysMs = map[string]int{"heos-1": 0}
+	if got := h.effectiveDelays(g, "mp3-192")["heos-1"]; got != 0 {
+		t.Errorf("an explicit 0 = %d, must beat the default", got)
+	}
+}
+
+func TestComputedFieldsAreNeverStored(t *testing.T) {
+	h, state := newTestHub(t, "", twoDevices)
+	h.SaveGroup(Group{ID: "g1", Name: "Uppe", DeviceIDs: []string{"heos-1"}, AirPlay: true,
+		DefaultDelaysMs: map[string]int{"heos-1": 50}, NowPlaying: nil})
+	data, _ := os.ReadFile(state)
+	if strings.Contains(string(data), "defaultDelaysMs") || strings.Contains(string(data), `"airplay": true`) {
+		t.Errorf("computed fields were stored:\n%s", data)
+	}
+}

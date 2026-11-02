@@ -25,6 +25,8 @@ type Group struct {
 	// DelaysMs holds the extra delay per device, used to line up speakers that buffer differently.
 	// Speakers buffer each format differently, so see DelayKey for how the entries are keyed.
 	DelaysMs map[string]int `json:"delaysMs,omitempty"`
+	// DefaultDelaysMs holds the delays used for devices that have no entry in DelaysMs. Not stored.
+	DefaultDelaysMs map[string]int `json:"defaultDelaysMs,omitempty"`
 	// Format is the stream encoding: "mp3-192" (default, empty) or "wav" (uncompressed, for lower lag).
 	Format string `json:"format,omitempty"`
 	Active bool   `json:"active"`
@@ -70,6 +72,41 @@ func New(port int, statePath string, air *airplay.Manager) *Hub {
 }
 
 const soloPrefix = "solo-"
+
+// mixedHEOSDelayMs is added by default to a HEOS speaker in a group that also holds a Cast speaker: with the
+// same lead-in HEOS played slightly early, and 50 ms put them in step.
+const mixedHEOSDelayMs = 50
+
+// delaysFor returns the delay to use per DelayKey: the defaults, overridden by every delay set on the group
+// (an explicit 0 counts). It must be called with h.mu held.
+func (h *Hub) delaysFor(g *Group, format string) map[string]int {
+	out := map[string]int{}
+	var haveCast bool
+	var heos []string
+	for _, id := range g.DeviceIDs {
+		switch h.devices[id].Kind {
+		case devices.Cast:
+			haveCast = true
+		case devices.HEOS:
+			heos = append(heos, id)
+		}
+	}
+	if haveCast {
+		for _, id := range heos {
+			out[DelayKey(id, format)] = mixedHEOSDelayMs
+		}
+	}
+	return out
+}
+
+// effectiveDelays is delaysFor with the group's own delays applied on top.
+func (h *Hub) effectiveDelays(g *Group, format string) map[string]int {
+	out := h.delaysFor(g, format)
+	for k, v := range g.DelaysMs {
+		out[k] = v
+	}
+	return out
+}
 
 // DelayKey is the DelaysMs key for a device. The default format uses the plain device ID, others add "@format",
 // so delays calibrated for one format are kept when switching to another and back.
@@ -268,6 +305,12 @@ func (h *Hub) Groups() []Group {
 	out := make([]Group, 0, len(h.groups))
 	for _, g := range h.groups {
 		c := *g
+		if !g.Solo {
+			c.DefaultDelaysMs = h.delaysFor(g, stream.FormatByName(g.Format).Name)
+			if len(c.DefaultDelaysMs) == 0 {
+				c.DefaultDelaysMs = nil
+			}
+		}
 		_, c.AirPlay = h.air.PCM(g.ID)
 		if np, ok := h.air.NowPlaying(g.ID); ok && (np.Playing || np.Title != "") {
 			c.NowPlaying = &np
@@ -291,6 +334,7 @@ func (h *Hub) SaveGroup(g Group) Group {
 		g.Active = old.Active
 	}
 	g.Solo = false
+	g.AirPlay, g.NowPlaying, g.DefaultDelaysMs = false, nil, nil // computed on read, never stored
 	h.groups[g.ID] = &g
 	h.rebuildSolos()
 	h.save()
@@ -367,10 +411,7 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 	h.streams[id] = &running{b: b, cancel: cancel}
 	g.Active = true
 	members := append([]string(nil), g.DeviceIDs...)
-	delays := make(map[string]int, len(g.DelaysMs))
-	for k, v := range g.DelaysMs {
-		delays[k] = v
-	}
+	delays := h.effectiveDelays(g, format.Name)
 	h.mu.Unlock()
 
 	var errs []error

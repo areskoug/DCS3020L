@@ -85,7 +85,7 @@ function render() {
         <option value=""${g.format ? '' : ' selected'}>Normal (MP3)</option>
         <option value="wav"${g.format === 'wav' ? ' selected' : ''}>Lågt lagg (WAV)</option></select></label>
       ${g.deviceIds.map(i => `<label class="row"><span>${esc(name(i))}</span><span class="dim"><input type="number" min="0" max="40" step="0.01" style="width:5.5em"
-        value="${((g.delaysMs || {})[delayKey(g, i)] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span>
+        value="${((g.delaysMs || {})[delayKey(g, i)] ?? (g.defaultDelaysMs || {})[delayKey(g, i)] ?? 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span>
         <span class="dim"><input type="number" min="0" max="100" step="5" style="width:4em"
         value="${(g.trimsPct || {})[i] ?? 100}" data-trim-group="${g.id}" data-trim-dev="${i}"> % nivå</span></label>`).join('')}
       </div>`).join('') || '<div class="dim">Inga grupper än.</div>';

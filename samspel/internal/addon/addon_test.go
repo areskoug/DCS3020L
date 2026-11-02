@@ -3,6 +3,7 @@
 package addon
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,5 +137,16 @@ func TestStartScriptIsExecutable(t *testing.T) {
 	}
 	if info.Mode()&0o111 == 0 {
 		t.Error("run.sh is not executable")
+	}
+}
+
+func TestURLIsAnAbsoluteWebAddress(t *testing.T) {
+	raw, ok := readConfig(t)["url"].(string)
+	if !ok {
+		t.Skip("no url")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		t.Errorf("url %q must be an absolute http or https address", raw)
 	}
 }

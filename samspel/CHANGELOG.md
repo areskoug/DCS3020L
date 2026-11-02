@@ -1,5 +1,9 @@
 # Ändringslogg
 
+## 0.7.0
+- En HEOS-högtalare i en grupp som också har en Cast-högtalare får 0,05 sekunders fördröjning som standard. Egna värden vinner, även 0.
+- Länken på informationssidan går nu till den lokala adressen. `[HOST]` blev Nabu Casa-adressen vid fjärråtkomst, där port 8080 inte finns.
+
 ## 0.6.9
 - Byggen går snabbare: beroenden kompileras inte om från början för varje version.
 - Ändringslogg läggs till. Tester kontrollerar nu att `config.yaml`, ändringsloggen och Dockerfilen är giltiga innan en version släpps.
