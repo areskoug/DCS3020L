@@ -246,7 +246,7 @@ func (h *Hub) SetDeviceCushion(id string, seconds int) bool {
 	if !ok || seconds < 1 || seconds > 30 {
 		return false
 	}
-	if seconds == devices.DefaultCushion(d.Kind) {
+	if seconds == devices.DefaultCushionSec {
 		seconds = 0
 	}
 	d.CushionSec = seconds

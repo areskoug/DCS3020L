@@ -137,10 +137,11 @@ func TestDeviceFormatValidation(t *testing.T) {
 	}
 }
 
-func TestCushionDefaultsDependOnKind(t *testing.T) {
-	cast, heos := devices.Device{Kind: devices.Cast}, devices.Device{Kind: devices.HEOS}
-	if cast.Cushion() != 5 || heos.Cushion() != 3 {
-		t.Errorf("defaults: cast %d, heos %d", cast.Cushion(), heos.Cushion())
+func TestCushionDefault(t *testing.T) {
+	for _, kind := range []devices.Kind{devices.Cast, devices.HEOS} {
+		if got := (devices.Device{Kind: kind}).Cushion(); got != 5 {
+			t.Errorf("%s default cushion = %d, want 5", kind, got)
+		}
 	}
 	if (devices.Device{Kind: devices.Cast, CushionSec: 8}).Cushion() != 8 {
 		t.Error("an explicit cushion must win")
@@ -158,7 +159,7 @@ func TestCushion(t *testing.T) {
 	if d, _ := New(8080, state, nil).Device("cast-2"); d.Cushion() != 8 {
 		t.Errorf("cushion lost after restart: %d", d.Cushion())
 	}
-	h.SetDeviceCushion("cast-2", 5) // naming the default for its kind clears the setting
+	h.SetDeviceCushion("cast-2", 5) // naming the default clears the setting
 	if d, _ := h.Device("cast-2"); d.CushionSec != 0 {
 		t.Errorf("CushionSec = %d, want unset", d.CushionSec)
 	}
@@ -170,7 +171,7 @@ func TestDevicesListShowsTheCushionInEffect(t *testing.T) {
 	for _, d := range h.Devices() {
 		got[d.ID] = d.CushionSec
 	}
-	if got["cast-2"] != 5 || got["heos-1"] != 3 {
+	if got["cast-2"] != 5 || got["heos-1"] != 5 {
 		t.Errorf("cushions shown: %v", got)
 	}
 	if d, _ := h.Device("cast-2"); d.CushionSec != 0 {

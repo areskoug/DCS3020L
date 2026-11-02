@@ -1,5 +1,5 @@
 name: Samspel Hub
-version: "0.6.5"
+version: "0.6.6"
 slug: samspel
 description: Multiroom-hubb för Google Cast och Denon HEOS
 arch:
