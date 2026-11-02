@@ -28,6 +28,13 @@ iPhone ──AirPlay──▶ shairport-sync (en per grupp och högtalare) ─�
 
 HA läser den gren som är förvald i GitHub. Höj `version` i `samspel/config.yaml` för att HA ska erbjuda en uppdatering.
 
+## Släppa en ny version
+1. Höj `version` i `samspel/config.yaml`.
+2. Lägg en rubrik `## <version>` överst i `samspel/CHANGELOG.md`. HA visar filen på tilläggets sida.
+3. Kör `cd samspel && go test ./...`. Testerna i `internal/addon` kontrollerar `config.yaml` mot det format Supervisor kräver, att ändringsloggen har en post för versionen och att Dockerfilen bara kopierar filer som finns.
+   En felaktig `config.yaml` gör att HA tyst döljer tillägget, och det syns bara i Supervisor-loggen (så hände det med 0.6.5).
+4. Pusha, och tryck sedan på ⋮ → Kontrollera efter uppdateringar i tilläggsbutiken. Bygget tar några minuter på en Pi.
+
 ## Begränsningar
 - **Fördröjning:** ljudet kommer ~3–10 s efter telefonen, beroende på högtalare, och paus, låtbyte och play märks lika sent.
   Mätt innan förrådet infördes: Cast ~26 s med MP3 och ~18 s med WAV, HEOS ~10 s. Cast loggar `BUFFERING` i loggen när den stannar och väntar.
