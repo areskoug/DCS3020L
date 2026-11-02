@@ -284,6 +284,7 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 		h.mu.Unlock()
 		return
 	}
+	log.Printf("volume %s: requested %d%%", g.Name, percent)
 	h.pendingVol[id] = percent
 	if h.volBusy[id] {
 		h.mu.Unlock()
@@ -315,7 +316,9 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 					defer wg.Done()
 					if err := devices.NewPlayer(d).SetVolume(context.Background(), p); err != nil {
 						log.Printf("volume %s: %v", d.Name, err)
+						return
 					}
+					log.Printf("volume %s: set to %d%%", d.Name, p)
 				}()
 			}
 			wg.Wait()
