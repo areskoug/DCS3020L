@@ -88,16 +88,6 @@ func Handler(h *hub.Hub) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("POST /api/devices/{id}/catchup", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Seconds int `json:"seconds"`
-		}
-		if json.NewDecoder(r.Body).Decode(&body) != nil || !h.SetDeviceCatchUp(r.PathValue("id"), body.Seconds) {
-			http.Error(w, "unknown Cast device or bad value", http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
 	mux.HandleFunc("POST /api/devices/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Percent int `json:"percent"`
@@ -126,33 +116,45 @@ func Handler(h *hub.Hub) http.Handler {
 	return mux
 }
 
+// cushion is the audio a speaker gets up front, in addition to its delay. Without it a speaker starts with an
+// empty buffer, runs dry at once because the live audio only arrives in real time, stalls and rebuffers.
+const cushion = 3 * time.Second
+
 func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, delay time.Duration, f stream.Format) {
-	ch, unsub, ok := h.Subscribe(id)
+	header, ch, unsub, ok := h.Subscribe(id)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	defer unsub()
-	log.Printf("stream %s: %s connected, delay %v (%s)", id, r.RemoteAddr, delay, r.UserAgent())
+	lead, err := stream.Silence(f, delay+cushion)
+	if err != nil {
+		log.Printf("stream %s: %v", id, err)
+		http.Error(w, "no audio", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("stream %s: %s connected, %v of silence in front (%s)", id, r.RemoteAddr, delay+cushion, r.UserAgent())
 	defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
 	w.Header().Set("Content-Type", f.ContentType)
 	w.Header().Set("Cache-Control", "no-cache")
 	fl, _ := w.(http.Flusher)
+	write := func(b []byte) bool {
+		if _, err := w.Write(b); err != nil {
+			return false
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+		return true
+	}
+	if !write(header) || !write(lead) {
+		return
+	}
 	for {
 		select {
 		case chunk := <-ch:
-			if wait := time.Until(chunk.At.Add(delay)); wait > 0 {
-				select {
-				case <-time.After(wait):
-				case <-r.Context().Done():
-					return
-				}
-			}
-			if _, err := w.Write(chunk.Data); err != nil {
+			if !write(chunk) {
 				return
-			}
-			if fl != nil {
-				fl.Flush()
 			}
 		case <-r.Context().Done():
 			return

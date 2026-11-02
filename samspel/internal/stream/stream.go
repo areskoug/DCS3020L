@@ -15,18 +15,12 @@ const (
 	Channels   = 2
 )
 
-// Chunk is a piece of encoded audio and the moment it left the encoder.
-type Chunk struct {
-	At   time.Time
-	Data []byte
-}
-
 // Broadcaster encodes PCM (s16le, 44.1 kHz, stereo) written to it and copies the
 // encoded bytes to every subscribed listener. Slow listeners drop chunks rather
 // than stalling the others.
 type Broadcaster struct {
 	mu   sync.Mutex
-	subs map[chan Chunk]struct{}
+	subs map[chan []byte]struct{}
 
 	pcmIn io.WriteCloser
 	cmd   *exec.Cmd
@@ -53,7 +47,7 @@ func New(ctx context.Context, f Format) (*Broadcaster, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
-	b := &Broadcaster{subs: map[chan Chunk]struct{}{}, pcmIn: in, cmd: cmd, headerLen: f.HeaderLen}
+	b := &Broadcaster{subs: map[chan []byte]struct{}{}, pcmIn: in, cmd: cmd, headerLen: f.HeaderLen}
 	go b.pump(out)
 	return b, nil
 }
@@ -63,17 +57,17 @@ func (b *Broadcaster) pump(r io.Reader) {
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
-			chunk := Chunk{At: time.Now(), Data: append([]byte(nil), buf[:n]...)}
+			chunk := append([]byte(nil), buf[:n]...)
 			b.mu.Lock()
 			if b.headerLen != nil && b.header == nil {
-				b.pending = append(b.pending, chunk.Data...)
+				b.pending = append(b.pending, chunk...)
 				hl, ok := b.headerLen(b.pending)
 				if !ok {
 					b.mu.Unlock()
 					continue
 				}
 				b.header = append([]byte(nil), b.pending[:hl]...)
-				chunk.Data = b.pending
+				chunk = b.pending
 				b.pending = nil
 			}
 			for ch := range b.subs {
@@ -99,19 +93,27 @@ func (b *Broadcaster) Close() error {
 	return b.cmd.Wait()
 }
 
-// Subscribe returns a channel of encoded chunks and a function to unsubscribe.
-// The buffer holds about 40 s of audio so that listeners can delay playback.
-func (b *Broadcaster) Subscribe() (<-chan Chunk, func()) {
-	ch := make(chan Chunk, 1024)
-	b.mu.Lock()
-	if b.header != nil {
-		ch <- Chunk{Data: b.header} // zero time: due immediately
-	}
-	b.subs[ch] = struct{}{}
-	b.mu.Unlock()
-	return ch, func() {
+// Subscribe returns the stream header (empty for formats without one), a channel of encoded chunks
+// and a function to unsubscribe. A listener must write the header before anything else.
+func (b *Broadcaster) Subscribe() (header []byte, ch <-chan []byte, unsubscribe func()) {
+	// A format with a header is only usable once the header is known, which takes a moment after start.
+	for i := 0; i < 150; i++ {
 		b.mu.Lock()
-		delete(b.subs, ch)
+		ready := b.headerLen == nil || b.header != nil
+		b.mu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	c := make(chan []byte, 1024)
+	b.mu.Lock()
+	b.subs[c] = struct{}{}
+	header = b.header
+	b.mu.Unlock()
+	return header, c, func() {
+		b.mu.Lock()
+		delete(b.subs, c)
 		b.mu.Unlock()
 	}
 }

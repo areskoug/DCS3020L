@@ -106,18 +106,3 @@ func TestDeviceFormatAPI(t *testing.T) {
 		t.Errorf("devices = %v", devs)
 	}
 }
-
-func TestCatchUpAPI(t *testing.T) {
-	srv := testServer(t)
-	if r := do(t, "POST", srv.URL+"/api/devices/cast-2/catchup", `{"seconds":4}`); r.StatusCode != 204 {
-		t.Errorf("valid: %d", r.StatusCode)
-	}
-	if r := do(t, "POST", srv.URL+"/api/devices/cast-2/catchup", `{"seconds":999}`); r.StatusCode != 400 {
-		t.Errorf("too large: %d", r.StatusCode)
-	}
-	var devs []map[string]any
-	json.NewDecoder(do(t, "GET", srv.URL+"/api/devices", "").Body).Decode(&devs)
-	if devs[0]["catchUpSec"] != float64(4) {
-		t.Errorf("devices = %v", devs)
-	}
-}

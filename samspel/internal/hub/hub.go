@@ -195,7 +195,7 @@ func (h *Hub) Discover(ctx context.Context) error {
 	}
 	h.mu.Lock()
 	for _, d := range found {
-		d.Format, d.CatchUpSec = h.devices[d.ID].Format, h.devices[d.ID].CatchUpSec
+		d.Format = h.devices[d.ID].Format
 		h.devices[d.ID] = d
 	}
 	h.rebuildSolos()
@@ -233,20 +233,6 @@ func (h *Hub) SetDeviceFormat(id, format string) bool {
 	d.Format = format
 	h.devices[id] = d
 	h.rebuildSolos()
-	h.save()
-	return true
-}
-
-// SetDeviceCatchUp sets how many seconds of buffer a Cast speaker keeps after it has started (0 turns it off).
-func (h *Hub) SetDeviceCatchUp(id string, seconds int) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	d, ok := h.devices[id]
-	if !ok || d.Kind != devices.Cast || seconds < 0 || seconds > 60 {
-		return false
-	}
-	d.CatchUpSec = seconds
-	h.devices[id] = d
 	h.save()
 	return true
 }
@@ -316,15 +302,15 @@ func (h *Hub) DeleteGroup(ctx context.Context, id string) {
 }
 
 // Subscribe attaches a listener to a running group's stream.
-func (h *Hub) Subscribe(id string) (<-chan stream.Chunk, func(), bool) {
+func (h *Hub) Subscribe(id string) (header []byte, ch <-chan []byte, unsubscribe func(), ok bool) {
 	h.mu.Lock()
 	r, ok := h.streams[id]
 	h.mu.Unlock()
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	ch, unsub := r.b.Subscribe()
-	return ch, unsub, true
+	header, ch, unsubscribe = r.b.Subscribe()
+	return header, ch, unsubscribe, true
 }
 
 // StartGroup starts the group's stream and points every member device at it. The audio comes from the
@@ -381,7 +367,7 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 			errs = append(errs, err)
 			continue
 		}
-		if err := devices.NewPlayer(d).Play(ctx, url, devices.PlayOptions{ContentType: format.ContentType, Delay: time.Duration(delays[DelayKey(did, format.Name)]) * time.Millisecond}); err != nil {
+		if err := devices.NewPlayer(d).Play(ctx, url, format.ContentType); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 		}
 	}

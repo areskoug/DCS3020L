@@ -110,7 +110,7 @@ func heosEscape(s string) string {
 
 type heosPlayer struct{ dev Device }
 
-func (p *heosPlayer) Play(_ context.Context, streamURL string, _ PlayOptions) error {
+func (p *heosPlayer) Play(_ context.Context, streamURL, _ string) error {
 	cmd := fmt.Sprintf("heos://browse/play_stream?pid=%s&url=%s", p.dev.HEOSPid, heosEscape(streamURL))
 	_, err := heosCommand(p.dev.Addr, cmd, "browse/play_stream")
 	return err

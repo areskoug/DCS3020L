@@ -13,7 +13,7 @@ iPhone ──AirPlay──▶ shairport-sync (en per grupp och högtalare) ─�
 ## Funktioner
 - **Grupper:** skapa grupper av högtalare i webbgränssnittet. Varje grupp syns som en egen AirPlay-högtalare.
 - **Varje högtalare går också att välja** i AirPlay-menyn, under sitt eget namn.
-- **Synk:** Cast och HEOS buffrar olika länge, så varje enhet i en grupp har en egen fördröjning (i sekunder) som du ställer in efter gehör. Testtonen (ett pip per sekund) är gjord för det.
+- **Synk:** Cast och HEOS buffrar olika länge, så varje enhet i en grupp har en egen fördröjning (i sekunder) som du ställer in efter gehör. Testtonen (ett pip per sekund) är gjord för det. Fördröjningen görs genom att hubben skickar tystnad framför ljudet. Alla högtalare får dessutom 3 sekunder tystnad som förråd, annars tar bufferten slut direkt vid start och högtalaren stannar och väntar flera gånger, vilket lägger på lagg.
 - **Volym:** telefonens volymreglage sätter högtalarnas egen volym direkt, med justerbar nivå per rum (balans).
 - **Spelas nu:** titel, artist, album och omslag visas i gränssnittet (visar vad telefonen spelar just nu, alltså före högtalarnas buffer).
 - Enheter upptäcks vid start och var tionde minut, och sparas.
@@ -28,8 +28,8 @@ iPhone ──AirPlay──▶ shairport-sync (en per grupp och högtalare) ─�
 HA läser den gren som är förvald i GitHub. Höj `version` i `samspel/config.yaml` för att HA ska erbjuda en uppdatering.
 
 ## Begränsningar
-- **Fördröjning:** högtalarna buffrar ungefär 10 s (HEOS) och 26 s (Cast) innan de spelar. Därför kommer ljudet sent,
-  och paus, låtbyte och tryck på play märks sent. Det beror på högtalarna. `LIVE`-läge i Cast och andra ljudformat gav ingen förbättring.
+- **Fördröjning:** ljudet kommer ~3–10 s efter telefonen, beroende på högtalare, och paus, låtbyte och play märks lika sent.
+  Mätt innan förrådet infördes: Cast ~26 s med MP3 och ~18 s med WAV, HEOS ~10 s. Cast loggar `BUFFERING` i loggen när den stannar och väntar.
 - Ljudet kodas som MP3 192 kbit/s, eller som okomprimerad WAV (valbart per grupp, testas för lägre lagg). Fördröjningarna sparas separat per format.
 - AirPlay 1 (Alpines shairport-sync saknar AirPlay 2 och nqptp). Räcker för musik från iPhone.
 - Om en högtalare ingår i en aktiv grupp och du spelar till den enskilt vinner den som startade senast.
