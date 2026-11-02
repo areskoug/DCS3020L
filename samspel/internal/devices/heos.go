@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -74,6 +74,7 @@ func heosCommand(addr, cmd, wantCommand string) ([]byte, error) {
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	log.Printf("heos %s <- %s", addr, cmd)
 	if _, err := fmt.Fprintf(conn, "heos://system/register_for_change_events?enable=off\r\n%s\r\n", cmd); err != nil {
 		return nil, err
 	}
@@ -90,6 +91,7 @@ func heosCommand(addr, cmd, wantCommand string) ([]byte, error) {
 		if json.Unmarshal(sc.Bytes(), &head) != nil || head.Heos.Command != wantCommand {
 			continue
 		}
+		log.Printf("heos %s -> %s", addr, sc.Bytes())
 		if head.Heos.Result == "fail" {
 			return nil, fmt.Errorf("heos %s failed: %s", wantCommand, head.Heos.Message)
 		}
@@ -101,10 +103,15 @@ func heosCommand(addr, cmd, wantCommand string) ([]byte, error) {
 	return nil, fmt.Errorf("heos: no response to %s", wantCommand)
 }
 
+// heosEscape encodes only the characters the HEOS CLI spec reserves ('&', '=' and '%').
+func heosEscape(s string) string {
+	return strings.NewReplacer("%", "%25", "&", "%26", "=", "%3D").Replace(s)
+}
+
 type heosPlayer struct{ dev Device }
 
 func (p *heosPlayer) Play(_ context.Context, streamURL string) error {
-	cmd := fmt.Sprintf("heos://browse/play_stream?pid=%s&url=%s", p.dev.HEOSPid, url.QueryEscape(streamURL))
+	cmd := fmt.Sprintf("heos://browse/play_stream?pid=%s&url=%s", p.dev.HEOSPid, heosEscape(streamURL))
 	_, err := heosCommand(p.dev.Addr, cmd, "browse/play_stream")
 	return err
 }
