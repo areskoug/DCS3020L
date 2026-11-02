@@ -5,9 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/areskoug/dcs3020l/internal/airplay"
 	"github.com/areskoug/dcs3020l/internal/hub"
@@ -18,6 +21,21 @@ func main() {
 	// "hub notify <url>" is how shairport-sync tells the running hub that playback started or ended.
 	if len(os.Args) == 3 && os.Args[1] == "notify" {
 		resp, err := http.Post(os.Args[2], "text/plain", nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		resp.Body.Close()
+		return
+	}
+
+	// "hub volume <url> <airplay volume>" turns AirPlay's 0 .. -30 dB slider (-144 = mute) into a percentage.
+	if len(os.Args) == 4 && os.Args[1] == "volume" {
+		v, err := strconv.ParseFloat(os.Args[3], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+		percent := max(0, min(100, int(math.Round((30+v)/30*100))))
+		resp, err := http.Post(os.Args[2], "application/json", strings.NewReader(fmt.Sprintf(`{"percent":%d}`, percent)))
 		if err != nil {
 			log.Fatal(err)
 		}

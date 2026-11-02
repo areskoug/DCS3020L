@@ -37,6 +37,9 @@ type Hub struct {
 	devices map[string]devices.Device
 	groups  map[string]*Group
 	streams map[string]*running
+
+	pendingVol map[string]int  // latest requested group volume, not yet applied
+	volBusy    map[string]bool // a goroutine is applying volumes for this group
 }
 
 type running struct {
@@ -45,7 +48,7 @@ type running struct {
 }
 
 func New(port int, statePath string, air *airplay.Manager) *Hub {
-	h := &Hub{port: port, statePath: statePath, air: air, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}}
+	h := &Hub{port: port, statePath: statePath, air: air, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}, pendingVol: map[string]int{}, volBusy: map[string]bool{}}
 	h.load()
 	h.syncAirPlay()
 	return h
@@ -270,4 +273,52 @@ func (h *Hub) streamURL(d devices.Device, groupID string, delayMs int) (string, 
 	defer c.Close()
 	ip := c.LocalAddr().(*net.UDPAddr).IP
 	return fmt.Sprintf("http://%s:%d/stream/%s/%d.mp3", ip, h.port, groupID, delayMs), nil
+}
+
+// SetGroupVolume sets the volume of every device in the group. Requests that arrive while speakers are
+// still being updated are coalesced, so dragging the phone's slider only applies the latest value.
+func (h *Hub) SetGroupVolume(id string, percent int) {
+	h.mu.Lock()
+	g, ok := h.groups[id]
+	if !ok {
+		h.mu.Unlock()
+		return
+	}
+	h.pendingVol[id] = percent
+	if h.volBusy[id] {
+		h.mu.Unlock()
+		return
+	}
+	h.volBusy[id] = true
+	members := append([]string(nil), g.DeviceIDs...)
+	h.mu.Unlock()
+
+	go func() {
+		for {
+			h.mu.Lock()
+			p, more := h.pendingVol[id]
+			delete(h.pendingVol, id)
+			if !more {
+				h.volBusy[id] = false
+				h.mu.Unlock()
+				return
+			}
+			h.mu.Unlock()
+			var wg sync.WaitGroup
+			for _, did := range members {
+				d, ok := h.Device(did)
+				if !ok {
+					continue
+				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if err := devices.NewPlayer(d).SetVolume(context.Background(), p); err != nil {
+						log.Printf("volume %s: %v", d.Name, err)
+					}
+				}()
+			}
+			wg.Wait()
+		}
+	}()
 }

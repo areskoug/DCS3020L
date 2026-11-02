@@ -56,6 +56,17 @@ func Handler(h *hub.Hub) http.Handler {
 		h.StopGroup(r.Context(), r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/groups/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Percent int `json:"percent"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		h.SetGroupVolume(r.PathValue("id"), clamp(body.Percent, 0, 100))
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/devices/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Percent int `json:"percent"`

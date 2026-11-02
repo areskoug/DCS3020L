@@ -118,16 +118,26 @@ func (m *Manager) hook(id, action string) string {
 	return fmt.Sprintf("%s notify http://127.0.0.1:%d/api/groups/%s/%s", m.hubBin, m.hubPort, id, action)
 }
 
+func (m *Manager) volumeHook(id string) string {
+	return fmt.Sprintf("%s volume http://127.0.0.1:%d/api/groups/%s/volume", m.hubBin, m.hubPort, id)
+}
+
 func (m *Manager) config(g Group, port int, fifo string) string {
 	q := func(s string) string { return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) }
-	return fmt.Sprintf(`general = { name = "%s"; port = %d; output_backend = "pipe"; };
+	// The volume is not applied to the audio: it would only be heard after the speakers' buffers drain.
+	// Instead the hub sets the speakers' own volume right away. AirPlay appends the volume to the hook command.
+	return fmt.Sprintf(`general = {
+	name = "%s"; port = %d; output_backend = "pipe";
+	ignore_volume_control = "yes";
+	run_this_when_volume_is_set = "%s ";
+};
 pipe = { name = "%s"; };
 sessioncontrol = {
 	run_this_before_entering_active_state = "%s";
 	run_this_after_exiting_active_state = "%s";
 	active_state_timeout = %d.0;
 };
-`, q(g.Name), port, q(fifo), q(m.hook(g.ID, "play")), q(m.hook(g.ID, "stop")), activeTimeout)
+`, q(g.Name), port, q(m.volumeHook(g.ID)), q(fifo), q(m.hook(g.ID, "play")), q(m.hook(g.ID, "stop")), activeTimeout)
 }
 
 func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {
