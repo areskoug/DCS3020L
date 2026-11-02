@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/areskoug/dcs3020l/internal/airplay"
 	"github.com/areskoug/dcs3020l/internal/devices"
 	"github.com/areskoug/dcs3020l/internal/stream"
 )
@@ -23,11 +24,14 @@ type Group struct {
 	// DelaysMs holds the extra delay per device ID, used to line up speakers that buffer differently.
 	DelaysMs map[string]int `json:"delaysMs,omitempty"`
 	Active   bool           `json:"active"`
+	// AirPlay tells the UI whether the group is visible as an AirPlay speaker. Not stored.
+	AirPlay bool `json:"airplay"`
 }
 
 type Hub struct {
 	port      int
 	statePath string
+	air       *airplay.Manager // nil when shairport-sync is unavailable
 
 	mu      sync.Mutex
 	devices map[string]devices.Device
@@ -40,10 +44,22 @@ type running struct {
 	cancel context.CancelFunc
 }
 
-func New(port int, statePath string) *Hub {
-	h := &Hub{port: port, statePath: statePath, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}}
+func New(port int, statePath string, air *airplay.Manager) *Hub {
+	h := &Hub{port: port, statePath: statePath, air: air, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}}
 	h.load()
+	h.syncAirPlay()
 	return h
+}
+
+// syncAirPlay publishes the current groups as AirPlay speakers.
+func (h *Hub) syncAirPlay() {
+	h.mu.Lock()
+	gs := make([]airplay.Group, 0, len(h.groups))
+	for _, g := range h.groups {
+		gs = append(gs, airplay.Group{ID: g.ID, Name: g.Name})
+	}
+	h.mu.Unlock()
+	h.air.Sync(gs)
 }
 
 func (h *Hub) load() {
@@ -117,7 +133,9 @@ func (h *Hub) Groups() []Group {
 	defer h.mu.Unlock()
 	out := make([]Group, 0, len(h.groups))
 	for _, g := range h.groups {
-		out = append(out, *g)
+		c := *g
+		_, c.AirPlay = h.air.PCM(g.ID)
+		out = append(out, c)
 	}
 	return out
 }
@@ -125,7 +143,6 @@ func (h *Hub) Groups() []Group {
 // SaveGroup creates or updates a group. An empty ID creates a new one.
 func (h *Hub) SaveGroup(g Group) Group {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if g.ID == "" {
 		g.ID = fmt.Sprintf("g%d", time.Now().UnixNano())
 	}
@@ -134,6 +151,8 @@ func (h *Hub) SaveGroup(g Group) Group {
 	}
 	h.groups[g.ID] = &g
 	h.save()
+	h.mu.Unlock()
+	h.syncAirPlay()
 	return g
 }
 
@@ -143,6 +162,7 @@ func (h *Hub) DeleteGroup(ctx context.Context, id string) {
 	delete(h.groups, id)
 	h.save()
 	h.mu.Unlock()
+	h.syncAirPlay()
 }
 
 // Subscribe attaches a listener to a running group's stream.
@@ -157,9 +177,9 @@ func (h *Hub) Subscribe(id string) (<-chan stream.Chunk, func(), bool) {
 	return ch, unsub, true
 }
 
-// StartGroup starts the group's stream (a test tone until the AirPlay source exists)
-// and points every member device at it.
-func (h *Hub) StartGroup(ctx context.Context, id string) error {
+// StartGroup starts the group's stream and points every member device at it. The audio comes from the
+// group's AirPlay receiver, or from a test beep if tone is set or AirPlay is unavailable.
+func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 	h.mu.Lock()
 	g, ok := h.groups[id]
 	if !ok {
@@ -178,11 +198,15 @@ func (h *Hub) StartGroup(ctx context.Context, id string) error {
 		cancel()
 		return err
 	}
-	go func() {
-		if err := stream.Tone(sctx, b); err != nil && sctx.Err() == nil {
-			log.Printf("tone source: %v", err)
-		}
-	}()
+	if pcm, ok := h.air.PCM(id); ok && !tone {
+		go stream.Feed(sctx, b, pcm)
+	} else {
+		go func() {
+			if err := stream.Tone(sctx, b); err != nil && sctx.Err() == nil {
+				log.Printf("tone source: %v", err)
+			}
+		}()
+	}
 
 	h.mu.Lock()
 	h.streams[id] = &running{b: b, cancel: cancel}

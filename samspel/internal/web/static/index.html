@@ -56,8 +56,8 @@ function render() {
   $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
   $('#groups').innerHTML = groups.map(g => `
     <div class="card"><div class="row"><div><b>${esc(g.name)}</b>
-      <div class="dim">${g.deviceIds.length ? '' : 'Tom grupp'}</div></div>
-      <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Spela'}</button>
+      <div class="dim">${g.airplay ? 'AirPlay: välj ”' + esc(g.name) + '” på telefonen' : 'AirPlay ej tillgängligt'}${g.deviceIds.length ? '' : ' · Tom grupp'}</div></div>
+      <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Testton'}</button>
       <button data-act="del" data-id="${g.id}">✕</button></div></div>
       ${g.deviceIds.map(i => `<label class="row"><span>${esc(name(i))}</span><span class="dim"><input type="number" min="0" max="40" step="0.5" style="width:4.5em"
         value="${((g.delaysMs || {})[i] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span></label>`).join('')}
@@ -81,7 +81,7 @@ $('#groups').onclick = async e => {
   const b = e.target.closest('button'); if (!b) return;
   try {
     if (b.dataset.act === 'del') await api('groups/' + b.dataset.id, { method:'DELETE' });
-    else { say(b.dataset.act === 'play' ? 'Startar…' : ''); await post(`groups/${b.dataset.id}/${b.dataset.act}`); say(''); }
+    else { say(b.dataset.act === 'play' ? 'Startar…' : ''); await post(`groups/${b.dataset.id}/${b.dataset.act}${b.dataset.act === 'play' ? '?tone=1' : ''}`); say(''); }
   } catch (err) { say(err.message); }
   await refresh();
 };

@@ -2,8 +2,8 @@
 
 Multiroom-hubb som skickar ett ljudflöde till flera högtalare samtidigt. Körs som Home Assistant OS-add-on.
 
-**Status (steg 1):** enhetsupptäckt (Google Cast via mDNS, Denon HEOS via SSDP), grupper, webbgränssnitt, MP3-ström per grupp och uppspelning av en testton.
-Ännu inte klart: AirPlay-mottagare (steg 2), fördröjning per enhet (steg 3).
+**Status:** enhetsupptäckt (Google Cast via mDNS, Denon HEOS via SSDP), grupper, webbgränssnitt, MP3-ström per grupp, fördröjning per enhet och testljud (ett pip per sekund).
+**Steg 2:** varje grupp visas som en egen AirPlay-högtalare (shairport-sync, AirPlay 1). Välj gruppens namn i AirPlay-menyn på telefonen. Ej provat mot en riktig telefon ännu.
 
 ## Installera i Home Assistant OS
 1. Inställningar → Tillägg → Tilläggsbutik → ⋮ → Förråd → lägg till `https://github.com/areskoug/DCS3020L`.

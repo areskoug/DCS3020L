@@ -7,6 +7,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /hub ./cmd/hub
 
 FROM alpine:3.20
-RUN apk add --no-cache ffmpeg ca-certificates
+RUN apk add --no-cache ffmpeg ca-certificates shairport-sync avahi dbus
 COPY --from=build /hub /hub
-CMD ["/hub", "-port", "8080", "-state", "/data/groups.json"]
+COPY run.sh /run.sh
+CMD ["/run.sh"]

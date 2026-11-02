@@ -46,7 +46,7 @@ func Handler(h *hub.Hub) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/play", func(w http.ResponseWriter, r *http.Request) {
-		if err := h.StartGroup(r.Context(), r.PathValue("id")); err != nil {
+		if err := h.StartGroup(r.Context(), r.PathValue("id"), r.URL.Query().Get("tone") == "1"); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
