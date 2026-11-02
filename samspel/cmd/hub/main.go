@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,7 +33,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		percent := max(0, min(100, int(math.Round((30+v)/30*100))))
+		percent := airplay.VolumePercent(v)
 		resp, err := http.Post(os.Args[2], "application/json", strings.NewReader(fmt.Sprintf(`{"percent":%d}`, percent)))
 		if err != nil {
 			log.Fatal(err)

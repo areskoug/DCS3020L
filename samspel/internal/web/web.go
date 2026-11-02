@@ -57,6 +57,16 @@ func Handler(h *hub.Hub) http.Handler {
 		h.StopGroup(r.Context(), r.PathValue("id"))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("GET /api/groups/{id}/cover", func(w http.ResponseWriter, r *http.Request) {
+		img := h.Cover(r.PathValue("id"))
+		if len(img) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", http.DetectContentType(img))
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(img)
+	})
 	mux.HandleFunc("POST /api/groups/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Percent int `json:"percent"`

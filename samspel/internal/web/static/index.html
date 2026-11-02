@@ -16,6 +16,10 @@
   button.primary { background:var(--accent); color:#111; }
   input[type=text] { width:100%; box-sizing:border-box; background:#2c2c2e; color:var(--fg); border:0; border-radius:10px; padding:10px; font:inherit; }
   input[type=range] { width:100%; accent-color:var(--accent); }
+  .np { display:flex; gap:10px; align-items:center; margin-top:8px; }
+  .np:empty { display:none; }
+  .np img { width:48px; height:48px; border-radius:8px; object-fit:cover; }
+  .np b, .np span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   label { display:flex; gap:8px; align-items:center; padding:4px 0; }
 </style>
 </head>
@@ -46,6 +50,11 @@ const post = (path, body) => api(path, { method:'POST', body: body && JSON.strin
 const say = t => $('#msg').textContent = t || '';
 let devices = [], groups = [];
 
+const npHtml = g => {
+  const n = g && g.nowPlaying; if (!n || !(n.title || n.playing)) return '';
+  const img = n.coverVer ? `<img src="api/groups/${g.id}/cover?v=${n.coverVer}" alt="">` : '';
+  return `${img}<div style="min-width:0"><b>${esc(n.title || 'Spelar')}</b><span class="dim">${esc([n.artist, n.album].filter(Boolean).join(' · '))}${n.playing ? '' : ' · pausad'}</span></div>`;
+};
 const soloName = d => (groups.find(g => g.id === 'solo-' + d.id) || {}).name;
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -54,6 +63,7 @@ function render() {
   const name = id => (devices.find(d => d.id === id) || {name:id}).name;
   $('#devices').innerHTML = devices.map(d => `
     <div class="card"><div class="row"><div><b>${esc(d.name)}</b><div class="dim">${d.kind} · ${esc(d.addr)}${soloName(d) ? ' · AirPlay: ”' + esc(soloName(d)) + '”' : ''}</div></div></div>
+    <div class="np" data-np="solo-${d.id}">${npHtml(groups.find(g => g.id === 'solo-' + d.id))}</div>
     <input type="range" min="0" max="100" value="30" data-vol="${d.id}"></div>`).join('') || '<div class="dim">Inga enheter hittade än.</div>';
   $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
   $('#groups').innerHTML = groups.filter(g => !g.solo).map(g => `
@@ -61,8 +71,11 @@ function render() {
       <div class="dim">${g.airplay ? 'AirPlay: välj ”' + esc(g.name) + '” på telefonen' : 'AirPlay ej tillgängligt'}${g.deviceIds.length ? '' : ' · Tom grupp'}</div></div>
       <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Testton'}</button>
       <button data-act="del" data-id="${g.id}">✕</button></div></div>
+      <div class="np" data-np="${g.id}">${npHtml(g)}</div>
       ${g.deviceIds.map(i => `<label class="row"><span>${esc(name(i))}</span><span class="dim"><input type="number" min="0" max="40" step="0.5" style="width:4.5em"
-        value="${((g.delaysMs || {})[i] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span></label>`).join('')}
+        value="${((g.delaysMs || {})[i] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span>
+        <span class="dim"><input type="number" min="0" max="100" step="5" style="width:4em"
+        value="${(g.trimsPct || {})[i] ?? 100}" data-trim-group="${g.id}" data-trim-dev="${i}"> % nivå</span></label>`).join('')}
       </div>`).join('') || '<div class="dim">Inga grupper än.</div>';
 }
 
@@ -89,6 +102,12 @@ $('#groups').onclick = async e => {
 };
 $('#groups').onchange = async e => {
   const el = e.target;
+  if (el.dataset.trimGroup) {
+    const g = groups.find(x => x.id === el.dataset.trimGroup);
+    g.trimsPct = { ...(g.trimsPct || {}), [el.dataset.trimDev]: Math.max(0, Math.min(100, Math.round(+el.value))) };
+    try { await post('groups', g); say(''); } catch (err) { say(err.message); }
+    return;
+  }
   if (!el.dataset.delayGroup) return;
   const g = groups.find(x => x.id === el.dataset.delayGroup);
   g.delaysMs = { ...(g.delaysMs || {}), [el.dataset.delayDev]: Math.round(+el.value * 1000) };
@@ -97,6 +116,12 @@ $('#groups').onchange = async e => {
 $('#devices').onchange = e => {
   if (e.target.dataset.vol) post(`devices/${e.target.dataset.vol}/volume`, { percent:+e.target.value }).catch(err => say(err.message));
 };
+setInterval(async () => {
+  try {
+    groups = await api('groups');
+    for (const g of groups) document.querySelectorAll(`[data-np="${g.id}"]`).forEach(el => { const h = npHtml(g); if (el.dataset.html !== h) { el.innerHTML = h; el.dataset.html = h; } });
+  } catch (e) { /* hub restarting, try again next tick */ }
+}, 4000);
 refresh();
 </script>
 </body>

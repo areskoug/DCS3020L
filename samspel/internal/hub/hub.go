@@ -25,11 +25,15 @@ type Group struct {
 	// DelaysMs holds the extra delay per device ID, used to line up speakers that buffer differently.
 	DelaysMs map[string]int `json:"delaysMs,omitempty"`
 	Active   bool           `json:"active"`
+	// TrimsPct scales the group volume per device (default 100), so one room can stay quieter than another.
+	TrimsPct map[string]int `json:"trimsPct,omitempty"`
 	// Solo marks the implicit one-speaker group every device gets, so it can be picked on its own in AirPlay.
 	// Solo groups are rebuilt from the device list and never stored.
 	Solo bool `json:"solo,omitempty"`
 	// AirPlay tells the UI whether the group is visible as an AirPlay speaker. Not stored.
 	AirPlay bool `json:"airplay"`
+	// NowPlaying is what the AirPlay source reports. Not stored.
+	NowPlaying *airplay.NowPlaying `json:"nowPlaying,omitempty"`
 }
 
 type Hub struct {
@@ -44,6 +48,7 @@ type Hub struct {
 
 	pendingVol map[string]int  // latest requested group volume, not yet applied
 	volBusy    map[string]bool // a goroutine is applying volumes for this group
+	lastVol    map[string]int  // the last group volume, reapplied when the balance changes
 }
 
 type running struct {
@@ -52,7 +57,7 @@ type running struct {
 }
 
 func New(port int, statePath string, air *airplay.Manager) *Hub {
-	h := &Hub{port: port, statePath: statePath, air: air, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}, pendingVol: map[string]int{}, volBusy: map[string]bool{}}
+	h := &Hub{port: port, statePath: statePath, air: air, devices: map[string]devices.Device{}, groups: map[string]*Group{}, streams: map[string]*running{}, pendingVol: map[string]int{}, volBusy: map[string]bool{}, lastVol: map[string]int{}}
 	h.load()
 	h.mu.Lock()
 	h.rebuildSolos()
@@ -211,6 +216,9 @@ func (h *Hub) Groups() []Group {
 	for _, g := range h.groups {
 		c := *g
 		_, c.AirPlay = h.air.PCM(g.ID)
+		if np, ok := h.air.NowPlaying(g.ID); ok && (np.Playing || np.Title != "") {
+			c.NowPlaying = &np
+		}
 		out = append(out, c)
 	}
 	return out
@@ -233,8 +241,12 @@ func (h *Hub) SaveGroup(g Group) Group {
 	h.groups[g.ID] = &g
 	h.rebuildSolos()
 	h.save()
+	vol, haveVol := h.lastVol[g.ID]
 	h.mu.Unlock()
 	h.syncAirPlay()
+	if haveVol && g.Active {
+		h.SetGroupVolume(g.ID, vol) // a changed balance should be heard right away
+	}
 	return g
 }
 
@@ -372,6 +384,7 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 		return
 	}
 	log.Printf("volume %s: requested %d%%", g.Name, percent)
+	h.lastVol[id] = percent
 	h.pendingVol[id] = percent
 	if h.volBusy[id] {
 		h.mu.Unlock()
@@ -379,6 +392,10 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 	}
 	h.volBusy[id] = true
 	members := append([]string(nil), g.DeviceIDs...)
+	trims := make(map[string]int, len(g.TrimsPct))
+	for k, v := range g.TrimsPct {
+		trims[k] = v
+	}
 	h.mu.Unlock()
 
 	go func() {
@@ -398,17 +415,24 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 				if !ok {
 					continue
 				}
+				level := p
+				if t, ok := trims[did]; ok {
+					level = p * max(0, min(100, t)) / 100
+				}
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					if err := devices.NewPlayer(d).SetVolume(context.Background(), p); err != nil {
+					if err := devices.NewPlayer(d).SetVolume(context.Background(), level); err != nil {
 						log.Printf("volume %s: %v", d.Name, err)
 						return
 					}
-					log.Printf("volume %s: set to %d%%", d.Name, p)
+					log.Printf("volume %s: set to %d%%", d.Name, level)
 				}()
 			}
 			wg.Wait()
 		}
 	}()
 }
+
+// Cover returns the current cover art for a group, or nil.
+func (h *Hub) Cover(id string) []byte { return h.air.Cover(id) }

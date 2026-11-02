@@ -32,6 +32,7 @@ type instance struct {
 	name   string
 	cancel context.CancelFunc
 	pcm    chan []byte
+	meta   *state
 }
 
 // Manager keeps the shairport-sync processes in line with the hub's groups.
@@ -77,6 +78,38 @@ func (m *Manager) PCM(id string) (<-chan []byte, bool) {
 	return in.pcm, true
 }
 
+// NowPlaying returns the track information for a group. It is safe to call on a nil Manager.
+func (m *Manager) NowPlaying(id string) (NowPlaying, bool) {
+	if m == nil {
+		return NowPlaying{}, false
+	}
+	m.mu.Lock()
+	in, ok := m.inst[id]
+	m.mu.Unlock()
+	if !ok {
+		return NowPlaying{}, false
+	}
+	in.meta.mu.Lock()
+	defer in.meta.mu.Unlock()
+	return in.meta.np, true
+}
+
+// Cover returns the latest cover art (JPEG or PNG) for a group, or nil.
+func (m *Manager) Cover(id string) []byte {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	in, ok := m.inst[id]
+	m.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	in.meta.mu.Lock()
+	defer in.meta.mu.Unlock()
+	return in.meta.cover
+}
+
 // Sync starts, restarts and stops instances so that they match groups.
 func (m *Manager) Sync(groups []Group) {
 	if m == nil {
@@ -112,7 +145,7 @@ func (m *Manager) start(g Group) {
 		m.ports[g.ID] = port
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
-	in := &instance{name: g.Name, cancel: cancel, pcm: make(chan []byte, 16)}
+	in := &instance{name: g.Name, cancel: cancel, pcm: make(chan []byte, 16), meta: &state{}}
 	m.inst[g.ID] = in
 	go m.run(ctx, g, port, in)
 }
@@ -125,7 +158,7 @@ func (m *Manager) volumeHook(id string) string {
 	return fmt.Sprintf("%s volume http://127.0.0.1:%d/api/groups/%s/volume", m.hubBin, m.hubPort, id)
 }
 
-func (m *Manager) config(g Group, port int, fifo string) string {
+func (m *Manager) config(g Group, port int, fifo, meta string) string {
 	q := func(s string) string { return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) }
 	// The volume is not applied to the audio: it would only be heard after the speakers' buffers drain.
 	// Instead the hub sets the speakers' own volume right away. AirPlay appends the volume to the hook command.
@@ -136,23 +169,31 @@ func (m *Manager) config(g Group, port int, fifo string) string {
 	run_this_when_volume_is_set = "%s ";
 };
 pipe = { name = "%s"; };
+metadata = { enabled = "yes"; include_cover_art = "yes"; pipe_name = "%s"; };
 sessioncontrol = {
 	run_this_before_entering_active_state = "%s";
 	run_this_after_exiting_active_state = "%s";
 	active_state_timeout = %d.0;
 };
-`, q(g.Name), port, udpBase+10*(port-basePort), q(m.volumeHook(g.ID)), q(fifo), q(m.hook(g.ID, "play")), q(m.hook(g.ID, "stop")), activeTimeout)
+`, q(g.Name), port, udpBase+10*(port-basePort), q(m.volumeHook(g.ID)), q(fifo), q(meta), q(m.hook(g.ID, "play")), q(m.hook(g.ID, "stop")), activeTimeout)
 }
 
 func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {
 	fifo := filepath.Join(m.dir, g.ID+".pcm")
 	conf := filepath.Join(m.dir, g.ID+".conf")
+	metaPipe := filepath.Join(m.dir, g.ID+".meta")
 	os.Remove(fifo)
+	os.Remove(metaPipe)
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		log.Printf("airplay %s: mkfifo: %v", g.Name, err)
 		return
 	}
+	if err := syscall.Mkfifo(metaPipe, 0o600); err != nil {
+		log.Printf("airplay %s: mkfifo metadata: %v", g.Name, err)
+		return
+	}
 	defer os.Remove(fifo)
+	defer os.Remove(metaPipe)
 	defer os.Remove(conf)
 	// Holding the FIFO open for both reading and writing keeps shairport-sync's open() from blocking.
 	f, err := os.OpenFile(fifo, os.O_RDWR, 0)
@@ -161,6 +202,12 @@ func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {
 		return
 	}
 	go func() { <-ctx.Done(); f.Close() }()
+	if mf, err := os.OpenFile(metaPipe, os.O_RDWR, 0); err == nil {
+		go func() { <-ctx.Done(); mf.Close() }()
+		go readMetadata(mf, in.meta)
+	} else {
+		log.Printf("airplay %s: open metadata pipe: %v", g.Name, err)
+	}
 	go func() {
 		var last time.Time
 		for {
@@ -181,7 +228,7 @@ func (m *Manager) run(ctx context.Context, g Group, port int, in *instance) {
 			}
 		}
 	}()
-	if err := os.WriteFile(conf, []byte(m.config(g, port, fifo)), 0o644); err != nil {
+	if err := os.WriteFile(conf, []byte(m.config(g, port, fifo, metaPipe)), 0o644); err != nil {
 		log.Printf("airplay %s: write config: %v", g.Name, err)
 		return
 	}
