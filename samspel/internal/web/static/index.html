@@ -71,6 +71,8 @@ function render() {
     <label class="row"><span class="dim">Ljudformat</span><select data-dev-format="${d.id}">
       <option value=""${d.format ? '' : ' selected'}>Normal (MP3)</option>
       <option value="wav"${d.format === 'wav' ? ' selected' : ''}>Lågt lagg (WAV)</option></select></label>
+    <label class="row"><span class="dim">Förråd vid start</span><span class="dim"><input type="number" min="1" max="30" step="1" style="width:4em"
+      value="${d.cushionSec || 3}" data-dev-cushion="${d.id}"> s</span></label>
     <input type="range" min="0" max="100" value="30" data-vol="${d.id}"></div>`).join('') || '<div class="dim">Inga enheter hittade än.</div>';
   $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
   $('#groups').innerHTML = groups.filter(g => !g.solo).map(g => `
@@ -130,6 +132,10 @@ $('#groups').onchange = async e => {
   try { await post('groups', g); say(g.active ? 'Fördröjningen gäller nästa gång du trycker Spela.' : ''); } catch (err) { say(err.message); }
 };
 $('#devices').onchange = async e => {
+  if (e.target.dataset.devCushion) {
+    try { await post(`devices/${e.target.dataset.devCushion}/cushion`, { seconds: Math.round(+e.target.value) }); say('Gäller nästa gång högtalaren startar.'); await refresh(); } catch (err) { say(err.message); }
+    return;
+  }
   if (e.target.dataset.devFormat) {
     try { await post(`devices/${e.target.dataset.devFormat}/format`, { format: e.target.value }); say('Formatet gäller nästa gång högtalaren startar.'); await refresh(); } catch (err) { say(err.message); }
     return;

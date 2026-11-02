@@ -88,6 +88,16 @@ func Handler(h *hub.Hub) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/devices/{id}/cushion", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Seconds int `json:"seconds"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || !h.SetDeviceCushion(r.PathValue("id"), body.Seconds) {
+			http.Error(w, "unknown device or a value outside 1-30", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/devices/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Percent int `json:"percent"`
@@ -108,7 +118,7 @@ func Handler(h *hub.Hub) http.Handler {
 	mux.HandleFunc("GET /stream/{id}/{file}", func(w http.ResponseWriter, r *http.Request) {
 		file := r.PathValue("file")
 		stem, ext, _ := strings.Cut(file, ".")
-		serveStream(h, w, r, r.PathValue("id"), time.Duration(clamp(atoi(stem), 0, 40000))*time.Millisecond, stream.FormatByExt(ext))
+		serveStream(h, w, r, r.PathValue("id"), time.Duration(clamp(atoi(stem), 0, 60000))*time.Millisecond, stream.FormatByExt(ext))
 	})
 	mux.HandleFunc("GET /stream/{name}", func(w http.ResponseWriter, r *http.Request) {
 		serveStream(h, w, r, strings.TrimSuffix(r.PathValue("name"), ".mp3"), 0, stream.Formats[0])
@@ -116,24 +126,23 @@ func Handler(h *hub.Hub) http.Handler {
 	return mux
 }
 
-// cushion is the audio a speaker gets up front, in addition to its delay. Without it a speaker starts with an
-// empty buffer, runs dry at once because the live audio only arrives in real time, stalls and rebuffers.
-const cushion = 3 * time.Second
-
-func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, delay time.Duration, f stream.Format) {
+// serveStream sends the header, then lead of silence, then the live audio. The silence is a speaker's delay plus
+// its cushion. Without a cushion a speaker starts with an empty buffer, runs dry at once because the live audio
+// only arrives in real time, and stalls.
+func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, lead time.Duration, f stream.Format) {
 	header, ch, unsub, ok := h.Subscribe(id)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	defer unsub()
-	lead, err := stream.Silence(f, delay+cushion)
+	silence, err := stream.Silence(f, lead)
 	if err != nil {
 		log.Printf("stream %s: %v", id, err)
 		http.Error(w, "no audio", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("stream %s: %s connected, %v of silence in front (%s)", id, r.RemoteAddr, delay+cushion, r.UserAgent())
+	log.Printf("stream %s: %s connected, %v of silence in front (%s)", id, r.RemoteAddr, lead, r.UserAgent())
 	defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
 	w.Header().Set("Content-Type", f.ContentType)
 	w.Header().Set("Cache-Control", "no-cache")
@@ -147,7 +156,7 @@ func serveStream(h *hub.Hub, w http.ResponseWriter, r *http.Request, id string, 
 		}
 		return true
 	}
-	if !write(header) || !write(lead) {
+	if !write(header) || !write(silence) {
 		return
 	}
 	for {

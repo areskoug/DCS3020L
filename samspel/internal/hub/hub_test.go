@@ -136,3 +136,23 @@ func TestDeviceFormatValidation(t *testing.T) {
 		t.Errorf("format = %q, want default", d.Format)
 	}
 }
+
+func TestCushion(t *testing.T) {
+	if (devices.Device{}).Cushion() != 3 || (devices.Device{CushionSec: 8}).Cushion() != 8 {
+		t.Error("an unset cushion must use the default")
+	}
+	h, state := newTestHub(t, "", twoDevices)
+	if !h.SetDeviceCushion("cast-2", 8) {
+		t.Fatal("8 s should be accepted")
+	}
+	if h.SetDeviceCushion("cast-2", 0) || h.SetDeviceCushion("cast-2", 31) || h.SetDeviceCushion("nope", 5) {
+		t.Error("out of range values and unknown devices must be refused")
+	}
+	if d, _ := New(8080, state, nil).Device("cast-2"); d.Cushion() != 8 {
+		t.Errorf("cushion lost after restart: %d", d.Cushion())
+	}
+	h.SetDeviceCushion("cast-2", 3) // naming the default clears the setting
+	if d, _ := h.Device("cast-2"); d.CushionSec != 0 {
+		t.Errorf("CushionSec = %d, want unset", d.CushionSec)
+	}
+}

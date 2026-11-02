@@ -195,7 +195,7 @@ func (h *Hub) Discover(ctx context.Context) error {
 	}
 	h.mu.Lock()
 	for _, d := range found {
-		d.Format = h.devices[d.ID].Format
+		d.Format, d.CushionSec = h.devices[d.ID].Format, h.devices[d.ID].CushionSec
 		h.devices[d.ID] = d
 	}
 	h.rebuildSolos()
@@ -233,6 +233,23 @@ func (h *Hub) SetDeviceFormat(id, format string) bool {
 	d.Format = format
 	h.devices[id] = d
 	h.rebuildSolos()
+	h.save()
+	return true
+}
+
+// SetDeviceCushion sets how many seconds of silence a speaker gets up front (1 to 30).
+func (h *Hub) SetDeviceCushion(id string, seconds int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	d, ok := h.devices[id]
+	if !ok || seconds < 1 || seconds > 30 {
+		return false
+	}
+	if seconds == devices.DefaultCushionSec {
+		seconds = 0
+	}
+	d.CushionSec = seconds
+	h.devices[id] = d
 	h.save()
 	return true
 }
@@ -362,7 +379,8 @@ func (h *Hub) StartGroup(ctx context.Context, id string, tone bool) error {
 			errs = append(errs, fmt.Errorf("device %s not found", did))
 			continue
 		}
-		url, err := h.streamURL(d, id, delays[DelayKey(did, format.Name)], format.Ext)
+		lead := delays[DelayKey(did, format.Name)] + d.Cushion()*1000
+		url, err := h.streamURL(d, id, lead, format.Ext)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -399,14 +417,14 @@ func (h *Hub) StopGroup(ctx context.Context, id string) {
 }
 
 // streamURL builds the URL the device should fetch, using the local IP that routes to it.
-func (h *Hub) streamURL(d devices.Device, groupID string, delayMs int, ext string) (string, error) {
+func (h *Hub) streamURL(d devices.Device, groupID string, leadMs int, ext string) (string, error) {
 	c, err := net.Dial("udp4", net.JoinHostPort(d.Addr, "9"))
 	if err != nil {
 		return "", err
 	}
 	defer c.Close()
 	ip := c.LocalAddr().(*net.UDPAddr).IP
-	return fmt.Sprintf("http://%s:%d/stream/%s/%d.%s", ip, h.port, groupID, delayMs, ext), nil
+	return fmt.Sprintf("http://%s:%d/stream/%s/%d.%s", ip, h.port, groupID, leadMs, ext), nil
 }
 
 // SetGroupVolume sets the volume of every device in the group. Requests that arrive while speakers are

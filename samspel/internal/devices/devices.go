@@ -3,6 +3,9 @@ package devices
 
 import "context"
 
+// DefaultCushionSec is the cushion used when a device has none set.
+const DefaultCushionSec = 3
+
 type Kind string
 
 const (
@@ -22,6 +25,17 @@ type Device struct {
 	// Format is the stream encoding used when this speaker is played on its own ("" is the default).
 	// It is a setting, not discovery data, so discovery must keep it.
 	Format string `json:"format,omitempty"`
+	// CushionSec is how many seconds of silence the speaker gets up front, so it starts with audio in hand
+	// (0 means DefaultCushionSec). A setting, so discovery must keep it.
+	CushionSec int `json:"cushionSec,omitempty"`
+}
+
+// Cushion returns the silence, in seconds, to send ahead of the live audio.
+func (d Device) Cushion() int {
+	if d.CushionSec <= 0 {
+		return DefaultCushionSec
+	}
+	return d.CushionSec
 }
 
 // Player controls a single device.

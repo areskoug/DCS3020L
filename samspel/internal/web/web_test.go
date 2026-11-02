@@ -106,3 +106,18 @@ func TestDeviceFormatAPI(t *testing.T) {
 		t.Errorf("devices = %v", devs)
 	}
 }
+
+func TestCushionAPI(t *testing.T) {
+	srv := testServer(t)
+	if r := do(t, "POST", srv.URL+"/api/devices/cast-2/cushion", `{"seconds":8}`); r.StatusCode != 204 {
+		t.Errorf("valid: %d", r.StatusCode)
+	}
+	if r := do(t, "POST", srv.URL+"/api/devices/cast-2/cushion", `{"seconds":0}`); r.StatusCode != 400 {
+		t.Errorf("zero: %d", r.StatusCode)
+	}
+	var devs []map[string]any
+	json.NewDecoder(do(t, "GET", srv.URL+"/api/devices", "").Body).Decode(&devs)
+	if devs[0]["cushionSec"] != float64(8) {
+		t.Errorf("devices = %v", devs)
+	}
+}
