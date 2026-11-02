@@ -3,6 +3,7 @@ package devices
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -45,7 +46,7 @@ func (p *castPlayer) connect() (*application.Application, error) {
 	return app, nil
 }
 
-func (p *castPlayer) Play(_ context.Context, url, contentType string) error {
+func (p *castPlayer) Play(_ context.Context, url string, o PlayOptions) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	app, err := p.connect()
@@ -54,10 +55,80 @@ func (p *castPlayer) Play(_ context.Context, url, contentType string) error {
 	}
 	defer app.Close(false)
 	// detach=true returns right after the load command instead of waiting for the media to end.
-	return app.Load(url, 0, contentType, false, true, false)
+	if err := app.Load(url, 0, o.ContentType, false, true, false); err != nil {
+		return err
+	}
+	p.watch(time.Now().Add(o.Delay))
+	return nil
+}
+
+var (
+	watchMu sync.Mutex
+	watches = map[string]context.CancelFunc{}
+)
+
+func stopWatch(id string) {
+	watchMu.Lock()
+	defer watchMu.Unlock()
+	if cancel, ok := watches[id]; ok {
+		cancel()
+		delete(watches, id)
+	}
+}
+
+// watch follows the speaker's player state for a while: it logs when it starts playing and, if the device
+// has CatchUpSec set, skips ahead in the stream once it plays. firstAudio is when the stream's audio starts
+// to arrive, so the seconds of content received so far are time.Since(firstAudio).
+func (p *castPlayer) watch(firstAudio time.Time) {
+	stopWatch(p.dev.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	watchMu.Lock()
+	watches[p.dev.ID] = cancel
+	watchMu.Unlock()
+	go func() {
+		defer cancel()
+		started := time.Now()
+		var seeked bool
+		var lastState string
+		for polls := 0; ctx.Err() == nil; polls++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			app := application.NewApplication(application.WithCacheDisabled(true))
+			if err := app.Start(p.dev.Addr, p.dev.Port); err != nil {
+				continue
+			}
+			_, media, _ := app.Status()
+			if media == nil {
+				app.Close(false)
+				continue
+			}
+			state, pos := media.PlayerState, media.CurrentTime
+			if state != lastState {
+				log.Printf("cast %s: %s at %.1fs, %.1fs after the stream was loaded", p.dev.Name, state, pos, time.Since(started).Seconds())
+				lastState = state
+			}
+			if state == "PLAYING" && p.dev.CatchUpSec > 0 && !seeked {
+				received := time.Since(firstAudio).Seconds()
+				target := received - float64(p.dev.CatchUpSec)
+				if target > float64(pos)+2 {
+					err := app.SeekToTime(float32(target))
+					log.Printf("cast %s: skipping from %.1fs to %.1fs (received %.1fs, keeping %ds): %v", p.dev.Name, pos, target, received, p.dev.CatchUpSec, err)
+					seeked = true
+				}
+			}
+			app.Close(false)
+			if state == "PLAYING" && (seeked || p.dev.CatchUpSec == 0) && polls > 4 {
+				return
+			}
+		}
+	}()
 }
 
 func (p *castPlayer) Stop(_ context.Context) error {
+	stopWatch(p.dev.ID)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	app, err := p.connect()

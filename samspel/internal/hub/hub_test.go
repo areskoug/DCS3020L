@@ -136,3 +136,24 @@ func TestDeviceFormatValidation(t *testing.T) {
 		t.Errorf("format = %q, want default", d.Format)
 	}
 }
+
+func TestCatchUpOnlyForCastAndKeptByDiscovery(t *testing.T) {
+	h, state := newTestHub(t, "", twoDevices)
+	if !h.SetDeviceCatchUp("cast-2", 3) {
+		t.Fatal("Cast speakers accept a catch-up setting")
+	}
+	for name, ok := range map[string]bool{
+		"heos-1": h.SetDeviceCatchUp("heos-1", 3),  // HEOS cannot be seeked
+		"nope":   h.SetDeviceCatchUp("nope", 3),    // unknown device
+		"-1":     h.SetDeviceCatchUp("cast-2", -1), // out of range
+		"61":     h.SetDeviceCatchUp("cast-2", 61),
+	} {
+		if ok {
+			t.Errorf("%s should have been refused", name)
+		}
+	}
+	h2 := New(8080, state, nil)
+	if d, _ := h2.Device("cast-2"); d.CatchUpSec != 3 {
+		t.Errorf("catch-up lost after restart: %d", d.CatchUpSec)
+	}
+}

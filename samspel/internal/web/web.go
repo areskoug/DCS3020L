@@ -88,6 +88,16 @@ func Handler(h *hub.Hub) http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/devices/{id}/catchup", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Seconds int `json:"seconds"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || !h.SetDeviceCatchUp(r.PathValue("id"), body.Seconds) {
+			http.Error(w, "unknown Cast device or bad value", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("POST /api/devices/{id}/volume", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Percent int `json:"percent"`
