@@ -50,3 +50,18 @@ func TestSilenceIsCached(t *testing.T) {
 		t.Error("the second call should return the cached bytes")
 	}
 }
+
+func TestSilenceHasTenMillisecondResolution(t *testing.T) {
+	needFFmpeg(t)
+	b, err := Silence(FormatByName("wav"), 2350*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 2350 * bytesPerSecond / 1000; len(b) != want {
+		t.Errorf("got %d bytes, want %d (2.35 s)", len(b), want)
+	}
+	c, _ := Silence(FormatByName("wav"), 2360*time.Millisecond)
+	if len(c) <= len(b) {
+		t.Error("10 ms more silence should give more bytes")
+	}
+}
