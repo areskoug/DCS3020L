@@ -13,7 +13,7 @@ iPhone ──AirPlay──▶ shairport-sync (en per grupp och högtalare) ─�
 ## Funktioner
 - **Grupper:** skapa grupper av högtalare i webbgränssnittet. Varje grupp syns som en egen AirPlay-högtalare.
 - **Varje högtalare går också att välja** i AirPlay-menyn, under sitt eget namn.
-- **Synk:** Cast och HEOS buffrar olika länge, så varje enhet i en grupp har en egen fördröjning (i sekunder) som du ställer in efter gehör. Testtonen (ett pip per sekund) är gjord för det. Fördröjningen görs genom att hubben skickar tystnad framför ljudet. Alla högtalare får dessutom 3 sekunder tystnad som förråd, annars tar bufferten slut direkt vid start och högtalaren stannar och väntar flera gånger, vilket lägger på lagg.
+- **Synk:** Cast och HEOS buffrar olika länge, så varje enhet i en grupp har en egen fördröjning (i sekunder) som du ställer in efter gehör. Testsignalen (ett dubbelpip och ett enkelpip var åttonde sekund) är gjord för det: den upprepas inte varje sekund, så du hör även hela sekunders skillnad. Fördröjningen görs genom att hubben skickar tystnad framför ljudet. Alla högtalare får dessutom 3 sekunder tystnad som förråd, annars tar bufferten slut direkt vid start och högtalaren stannar och väntar flera gånger, vilket lägger på lagg.
 - **Volym:** telefonens volymreglage sätter högtalarnas egen volym direkt, med justerbar nivå per rum (balans).
 - **Spelas nu:** titel, artist, album och omslag visas i gränssnittet (visar vad telefonen spelar just nu, alltså före högtalarnas buffer).
 - Enheter upptäcks vid start och var tionde minut, och sparas.
