@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log"
 	"net/http"
 	"strings"
 
@@ -77,6 +78,8 @@ func Handler(h *hub.Hub) http.Handler {
 			return
 		}
 		defer unsub()
+		log.Printf("stream %s: %s connected (%s)", id, r.RemoteAddr, r.UserAgent())
+		defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.Header().Set("Cache-Control", "no-cache")
 		fl, _ := w.(http.Flusher)
