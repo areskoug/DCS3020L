@@ -3,9 +3,6 @@ package devices
 
 import "context"
 
-// DefaultCushionSec is the cushion used when a device has none set.
-const DefaultCushionSec = 3
-
 type Kind string
 
 const (
@@ -26,14 +23,23 @@ type Device struct {
 	// It is a setting, not discovery data, so discovery must keep it.
 	Format string `json:"format,omitempty"`
 	// CushionSec is how many seconds of silence the speaker gets up front, so it starts with audio in hand
-	// (0 means DefaultCushionSec). A setting, so discovery must keep it.
+	// (0 means DefaultCushion for its kind). A setting, so discovery must keep it.
 	CushionSec int `json:"cushionSec,omitempty"`
+}
+
+// DefaultCushion is the cushion, in seconds, for a device with none set. A Cast speaker that gets only 3 s
+// sometimes stalls at startup, while 4 s and up was reliable; HEOS starts cleanly on 3 s.
+func DefaultCushion(k Kind) int {
+	if k == Cast {
+		return 5
+	}
+	return 3
 }
 
 // Cushion returns the silence, in seconds, to send ahead of the live audio.
 func (d Device) Cushion() int {
 	if d.CushionSec <= 0 {
-		return DefaultCushionSec
+		return DefaultCushion(d.Kind)
 	}
 	return d.CushionSec
 }

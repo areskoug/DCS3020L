@@ -210,6 +210,7 @@ func (h *Hub) Devices() []devices.Device {
 	defer h.mu.Unlock()
 	out := make([]devices.Device, 0, len(h.devices))
 	for _, d := range h.devices {
+		d.CushionSec = d.Cushion() // the value in effect, also when it is the default
 		out = append(out, d)
 	}
 	return out
@@ -245,7 +246,7 @@ func (h *Hub) SetDeviceCushion(id string, seconds int) bool {
 	if !ok || seconds < 1 || seconds > 30 {
 		return false
 	}
-	if seconds == devices.DefaultCushionSec {
+	if seconds == devices.DefaultCushion(d.Kind) {
 		seconds = 0
 	}
 	d.CushionSec = seconds
