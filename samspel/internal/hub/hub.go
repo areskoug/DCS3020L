@@ -20,7 +20,9 @@ type Group struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	DeviceIDs []string `json:"deviceIds"`
-	Active    bool     `json:"active"`
+	// DelaysMs holds the extra delay per device ID, used to line up speakers that buffer differently.
+	DelaysMs map[string]int `json:"delaysMs,omitempty"`
+	Active   bool           `json:"active"`
 }
 
 type Hub struct {
@@ -144,7 +146,7 @@ func (h *Hub) DeleteGroup(ctx context.Context, id string) {
 }
 
 // Subscribe attaches a listener to a running group's stream.
-func (h *Hub) Subscribe(id string) (<-chan []byte, func(), bool) {
+func (h *Hub) Subscribe(id string) (<-chan stream.Chunk, func(), bool) {
 	h.mu.Lock()
 	r, ok := h.streams[id]
 	h.mu.Unlock()
@@ -186,6 +188,10 @@ func (h *Hub) StartGroup(ctx context.Context, id string) error {
 	h.streams[id] = &running{b: b, cancel: cancel}
 	g.Active = true
 	members := append([]string(nil), g.DeviceIDs...)
+	delays := make(map[string]int, len(g.DelaysMs))
+	for k, v := range g.DelaysMs {
+		delays[k] = v
+	}
 	h.mu.Unlock()
 
 	var errs []error
@@ -195,7 +201,7 @@ func (h *Hub) StartGroup(ctx context.Context, id string) error {
 			errs = append(errs, fmt.Errorf("device %s not found", did))
 			continue
 		}
-		url, err := h.streamURL(d, id)
+		url, err := h.streamURL(d, id, delays[did])
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -232,12 +238,12 @@ func (h *Hub) StopGroup(ctx context.Context, id string) {
 }
 
 // streamURL builds the URL the device should fetch, using the local IP that routes to it.
-func (h *Hub) streamURL(d devices.Device, groupID string) (string, error) {
+func (h *Hub) streamURL(d devices.Device, groupID string, delayMs int) (string, error) {
 	c, err := net.Dial("udp4", net.JoinHostPort(d.Addr, "9"))
 	if err != nil {
 		return "", err
 	}
 	defer c.Close()
 	ip := c.LocalAddr().(*net.UDPAddr).IP
-	return fmt.Sprintf("http://%s:%d/stream/%s.mp3", ip, h.port, groupID), nil
+	return fmt.Sprintf("http://%s:%d/stream/%s.mp3?delay=%d", ip, h.port, groupID, delayMs), nil
 }

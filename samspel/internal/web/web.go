@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/areskoug/dcs3020l/internal/devices"
 	"github.com/areskoug/dcs3020l/internal/hub"
@@ -78,7 +80,8 @@ func Handler(h *hub.Hub) http.Handler {
 			return
 		}
 		defer unsub()
-		log.Printf("stream %s: %s connected (%s)", id, r.RemoteAddr, r.UserAgent())
+		delay := time.Duration(clamp(atoi(r.URL.Query().Get("delay")), 0, 40000)) * time.Millisecond
+		log.Printf("stream %s: %s connected, delay %v (%s)", id, r.RemoteAddr, delay, r.UserAgent())
 		defer log.Printf("stream %s: %s disconnected", id, r.RemoteAddr)
 		w.Header().Set("Content-Type", "audio/mpeg")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -86,7 +89,14 @@ func Handler(h *hub.Hub) http.Handler {
 		for {
 			select {
 			case chunk := <-ch:
-				if _, err := w.Write(chunk); err != nil {
+				if wait := time.Until(chunk.At.Add(delay)); wait > 0 {
+					select {
+					case <-time.After(wait):
+					case <-r.Context().Done():
+						return
+					}
+				}
+				if _, err := w.Write(chunk.Data); err != nil {
 					return
 				}
 				if fl != nil {
@@ -104,3 +114,10 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
+func clamp(n, lo, hi int) int { return max(lo, min(hi, n)) }

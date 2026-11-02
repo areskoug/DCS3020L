@@ -56,9 +56,12 @@ function render() {
   $('#pick').innerHTML = devices.map(d => `<label><input type="checkbox" value="${d.id}"> ${esc(d.name)}</label>`).join('');
   $('#groups').innerHTML = groups.map(g => `
     <div class="card"><div class="row"><div><b>${esc(g.name)}</b>
-      <div class="dim">${g.deviceIds.map(i => esc(name(i))).join(', ') || 'Tom grupp'}</div></div>
+      <div class="dim">${g.deviceIds.length ? '' : 'Tom grupp'}</div></div>
       <div><button data-act="${g.active ? 'stop' : 'play'}" data-id="${g.id}" class="${g.active ? '' : 'primary'}">${g.active ? 'Stoppa' : 'Spela'}</button>
-      <button data-act="del" data-id="${g.id}">✕</button></div></div></div>`).join('') || '<div class="dim">Inga grupper än.</div>';
+      <button data-act="del" data-id="${g.id}">✕</button></div></div>
+      ${g.deviceIds.map(i => `<label class="row"><span>${esc(name(i))}</span><span class="dim"><input type="number" min="0" max="40" step="0.5" style="width:4.5em"
+        value="${((g.delaysMs || {})[i] || 0) / 1000}" data-delay-group="${g.id}" data-delay-dev="${i}"> s fördröjning</span></label>`).join('')}
+      </div>`).join('') || '<div class="dim">Inga grupper än.</div>';
 }
 
 async function refresh() { [devices, groups] = await Promise.all([api('devices'), api('groups')]); render(); }
@@ -81,6 +84,12 @@ $('#groups').onclick = async e => {
     else { say(b.dataset.act === 'play' ? 'Startar…' : ''); await post(`groups/${b.dataset.id}/${b.dataset.act}`); say(''); }
   } catch (err) { say(err.message); }
   await refresh();
+};
+$('#groups').onchange = async e => {
+  const el = e.target; if (!el.dataset.delayGroup) return;
+  const g = groups.find(x => x.id === el.dataset.delayGroup);
+  g.delaysMs = { ...(g.delaysMs || {}), [el.dataset.delayDev]: Math.round(+el.value * 1000) };
+  try { await post('groups', g); say(g.active ? 'Fördröjningen gäller nästa gång du trycker Spela.' : ''); } catch (err) { say(err.message); }
 };
 $('#devices').onchange = e => {
   if (e.target.dataset.vol) post(`devices/${e.target.dataset.vol}/volume`, { percent:+e.target.value }).catch(err => say(err.message));

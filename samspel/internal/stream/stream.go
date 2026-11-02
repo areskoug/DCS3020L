@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 const (
@@ -14,12 +15,18 @@ const (
 	Channels   = 2
 )
 
+// Chunk is a piece of encoded audio and the moment it left the encoder.
+type Chunk struct {
+	At   time.Time
+	Data []byte
+}
+
 // Broadcaster encodes PCM (s16le, 44.1 kHz, stereo) written to it and copies the
 // encoded bytes to every subscribed listener. Slow listeners drop chunks rather
 // than stalling the others.
 type Broadcaster struct {
 	mu   sync.Mutex
-	subs map[chan []byte]struct{}
+	subs map[chan Chunk]struct{}
 
 	pcmIn io.WriteCloser
 	cmd   *exec.Cmd
@@ -41,7 +48,7 @@ func New(ctx context.Context) (*Broadcaster, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
-	b := &Broadcaster{subs: map[chan []byte]struct{}{}, pcmIn: in, cmd: cmd}
+	b := &Broadcaster{subs: map[chan Chunk]struct{}{}, pcmIn: in, cmd: cmd}
 	go b.pump(out)
 	return b, nil
 }
@@ -51,7 +58,7 @@ func (b *Broadcaster) pump(r io.Reader) {
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
-			chunk := append([]byte(nil), buf[:n]...)
+			chunk := Chunk{At: time.Now(), Data: append([]byte(nil), buf[:n]...)}
 			b.mu.Lock()
 			for ch := range b.subs {
 				select {
@@ -77,8 +84,9 @@ func (b *Broadcaster) Close() error {
 }
 
 // Subscribe returns a channel of encoded chunks and a function to unsubscribe.
-func (b *Broadcaster) Subscribe() (<-chan []byte, func()) {
-	ch := make(chan []byte, 256)
+// The buffer holds about 40 s of audio so that listeners can delay playback.
+func (b *Broadcaster) Subscribe() (<-chan Chunk, func()) {
+	ch := make(chan Chunk, 1024)
 	b.mu.Lock()
 	b.subs[ch] = struct{}{}
 	b.mu.Unlock()
