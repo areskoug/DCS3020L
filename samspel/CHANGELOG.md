@@ -1,5 +1,10 @@
 # Ändringslogg
 
+## 0.7.1
+- Rättar en krasch: hubben kunde stanna helt med `panic: send on closed channel` när Cast-anslutningar stängdes medan enheten fortfarande skickade. Det hände när telefonens volym ändrades snabbt.
+- Rättar tre fel i samma bibliotek som kunde ge fel svar, 5 sekunders väntan eller krasch när flera Cast-högtalare hanterades samtidigt.
+- Ett fel i en bakgrundsprocess tar inte längre ned hela hubben.
+
 ## 0.7.0
 - En HEOS-högtalare i en grupp som också har en Cast-högtalare får 0,05 sekunders fördröjning som standard. Egna värden vinner, även 0.
 - Länken på informationssidan går nu till den lokala adressen. `[HOST]` blev Nabu Casa-adressen vid fjärråtkomst, där port 8080 inte finns.

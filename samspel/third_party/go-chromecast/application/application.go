@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -25,12 +26,13 @@ import (
 	"github.com/vishen/go-chromecast/playlists"
 	"github.com/vishen/go-chromecast/storage"
 	"path/filepath"
+	"reflect"
 )
 
 var (
 	// Global request id
-	requestID int
-	_         App = &Application{}
+	requestCounter atomic.Int64
+	_              App = &Application{}
 )
 
 const (
@@ -98,12 +100,15 @@ type Application struct {
 
 	// Internal mapping of request id to result channel
 	resultChanMap map[int]chan *pb.CastMessage
+	resultMu      sync.Mutex // guards resultChanMap, which recvMessages reads while requests add and remove entries
 
 	messageMu sync.Mutex
 	// Relay messages received so users can add custom logic to
 	// events.
 	messageChan   chan *pb.CastMessage
 	closeChanOnce sync.Once
+	closeMu       sync.RWMutex // held for reading while sending on messageChan, for writing while closing it
+	closed        bool
 	// Functions that will receive messages from 'messageChan'
 	messageFuncs []CastMessageFunc
 
@@ -248,7 +253,15 @@ func (a *Application) AddMessageFunc(f CastMessageFunc) {
 	a.messageFuncs = append(a.messageFuncs, f)
 }
 
+// recoverGoroutine keeps a panic in one of the library's goroutines from taking the whole process down.
+func recoverGoroutine(name string) {
+	if r := recover(); r != nil {
+		log.Errorf("%s stopped after a panic: %v", name, r)
+	}
+}
+
 func (a *Application) messageChanHandler() {
+	defer recoverGoroutine("messageChanHandler")
 	for msg := range a.messageChan {
 		a.messageMu.Lock()
 		for _, f := range a.messageFuncs {
@@ -281,13 +294,20 @@ func (a *Application) MediaFinished() {
 }
 
 func (a *Application) recvMessages() {
+	defer recoverGoroutine("recvMessages")
 	for msg := range a.conn.MsgChan() {
 		requestID, err := jsonparser.GetInt([]byte(*msg.PayloadUtf8), "requestId")
 		if err == nil {
-			if resultChan, ok := a.resultChanMap[int(requestID)]; ok {
-				resultChan <- msg
+			a.resultMu.Lock()
+			resultChan, ok := a.resultChanMap[int(requestID)]
+			a.resultMu.Unlock()
+			if ok {
+				select {
+				case resultChan <- msg:
+				default: // a second answer to the same request: nobody is waiting for it
+				}
 				// Relay the event to any user specified message funcs.
-				a.messageChan <- msg
+				a.relay(msg)
 				continue
 			}
 		}
@@ -336,6 +356,16 @@ func (a *Application) recvMessages() {
 			a.application, a.media, a.volumeReceiver = nil, nil, nil
 		}
 		// Relay the event to any user specified message funcs.
+		a.relay(msg)
+	}
+}
+
+// relay passes a message on to messageChanHandler, unless the application has been closed.
+// Samspel: Close used to close messageChan while recvMessages was still about to send on it, which panicked.
+func (a *Application) relay(msg *pb.CastMessage) {
+	a.closeMu.RLock()
+	defer a.closeMu.RUnlock()
+	if !a.closed {
 		a.messageChan <- msg
 	}
 }
@@ -442,7 +472,10 @@ func (a *Application) Close(stopMedia bool) error {
 		a.sendDefaultConn(&cast.CloseHeader)
 	}
 	defer a.closeChanOnce.Do(func() {
+		a.closeMu.Lock()
+		a.closed = true
 		close(a.messageChan)
+		a.closeMu.Unlock()
 	})
 	return a.conn.Close()
 }
@@ -1257,31 +1290,51 @@ func (a *Application) log(message string, args ...interface{}) {
 	}
 }
 
+// withRequestID returns a copy of payload carrying the request id. The library sends package level values such as
+// cast.GetStatusHeader, and writing the id into those shared objects made connections that run at the same time
+// overwrite each other's ids, so a request could leave with another request's number.
+func withRequestID(payload cast.Payload, id int) cast.Payload {
+	if v := reflect.ValueOf(payload); v.Kind() == reflect.Ptr && !v.IsNil() {
+		c := reflect.New(v.Elem().Type())
+		c.Elem().Set(v.Elem())
+		if p, ok := c.Interface().(cast.Payload); ok {
+			p.SetRequestId(id)
+			return p
+		}
+	}
+	payload.SetRequestId(id)
+	return payload
+}
+
 func (a *Application) send(payload cast.Payload, sourceID, destinationID, namespace string) (int, error) {
-	// NOTE: Not concurrent safe, but currently only synchronous flow is possible
-	// TODO(vishen): just make concurrent safe regardless of current flow
-	requestID += 1
-	payload.SetRequestId(requestID)
+	// Samspel: the counter is shared by all connections, which can now run at once.
+	requestID := int(requestCounter.Add(1))
+	payload = withRequestID(payload, requestID)
 	return requestID, a.conn.Send(requestID, payload, sourceID, destinationID, namespace)
 }
 
 func (a *Application) sendAndWait(payload cast.Payload, sourceID, destinationID, namespace string) (*pb.CastMessage, error) {
-	requestID, err := a.send(payload, sourceID, destinationID, namespace)
-	if err != nil {
+	// Samspel: the result channel has to exist before the request goes out. A quick device can answer before
+	// send returns, and the answer was then dropped and the call waited for the full timeout.
+	requestID := int(requestCounter.Add(1))
+	resultChan := make(chan *pb.CastMessage, 1)
+	a.resultMu.Lock()
+	a.resultChanMap[requestID] = resultChan
+	a.resultMu.Unlock()
+	defer func() {
+		a.resultMu.Lock()
+		delete(a.resultChanMap, requestID)
+		a.resultMu.Unlock()
+	}()
+
+	payload = withRequestID(payload, requestID)
+	if err := a.conn.Send(requestID, payload, sourceID, destinationID, namespace); err != nil {
 		return nil, err
 	}
 
 	// Set a timeout to wait for the response
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-
-	// TODO(vishen): not concurrent safe. Not a problem at the moment
-	// because only synchronous flow currently allowed.
-	resultChan := make(chan *pb.CastMessage, 1)
-	a.resultChanMap[requestID] = resultChan
-	defer func() {
-		delete(a.resultChanMap, requestID)
-	}()
 
 	select {
 	case <-ctx.Done():

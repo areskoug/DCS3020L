@@ -73,6 +73,14 @@ func New(port int, statePath string, air *airplay.Manager) *Hub {
 
 const soloPrefix = "solo-"
 
+// guard is deferred at the top of a background goroutine. A panic there would otherwise end the whole process,
+// and with it every stream, so it is logged and the goroutine ends instead.
+func guard(what string) {
+	if r := recover(); r != nil {
+		log.Printf("%s stopped after a panic: %v", what, r)
+	}
+}
+
 // mixedHEOSDelayMs is added by default to a HEOS speaker in a group that also holds a Cast speaker: with the
 // same lead-in HEOS played slightly early, and 50 ms put them in step.
 const mixedHEOSDelayMs = 50
@@ -144,6 +152,7 @@ func (h *Hub) rebuildSolos() {
 
 // Run keeps the device list fresh: once at startup and then every ten minutes.
 func (h *Hub) Run(ctx context.Context) {
+	defer guard("device discovery")
 	for {
 		if err := h.Discover(ctx); err != nil {
 			log.Printf("discover: %v", err)
@@ -494,6 +503,7 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 	h.mu.Unlock()
 
 	go func() {
+		defer guard("volume update")
 		for {
 			h.mu.Lock()
 			p, more := h.pendingVol[id]
@@ -517,6 +527,7 @@ func (h *Hub) SetGroupVolume(id string, percent int) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
+					defer guard("volume for " + d.Name)
 					if err := devices.NewPlayer(d).SetVolume(context.Background(), level); err != nil {
 						log.Printf("volume %s: %v", d.Name, err)
 						return

@@ -56,4 +56,4 @@ Kräver Go 1.25 och ffmpeg.
 - `internal/airplay`: en shairport-sync-process per grupp, ljud- och metadata-pipes.
 - `internal/hub`: grupper, enkelgrupper per enhet, volym och uppspelning.
 - `internal/web`: API, ljudströmmar och gränssnitt.
-- `samspel/third_party/go-chromecast`: kopia av [vishen/go-chromecast](https://github.com/vishen/go-chromecast) (Apache-2.0). Enda ändringen är att strömmen skickas som `LIVE`.
+- `samspel/third_party/go-chromecast`: kopia av [vishen/go-chromecast](https://github.com/vishen/go-chromecast) (Apache-2.0). Ändringar finns beskrivna i `samspel/third_party/go-chromecast/SAMSPEL.md`: strömmen skickas som `LIVE`, och flera fel som kunde krascha hubben eller ge fel svar vid samtidiga anslutningar är rättade.
